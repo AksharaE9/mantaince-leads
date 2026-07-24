@@ -134,6 +134,61 @@ export const uploadCsv = async (req, res) => {
         const logId = crypto.randomUUID();
         const fileExt = path.extname(file.originalname).toLowerCase() || '.csv';
         const fileName = `${logId}${fileExt}`;
+
+        if (process.env.VERCEL) {
+            // Vercel Serverless environment: bypass disk writes and run processing inline
+            const logRes = await query(`
+                INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, sub_vertical_id, assigned_to, lead_type)
+                VALUES ($1, $2, $3, $4, $5, 'processing', $6, $7, $8)
+                RETURNING *
+            `, [logId, req.user.sub, verticalId, fileName, file.originalname, subVerticalId, targetAssignedTo || null, leadType]);
+
+            const uploadLog = logRes.rows[0];
+
+            await logAudit(req, {
+                action: 'csv.upload_processing_vercel',
+                targetCollection: 'csv_upload_logs',
+                targetId: uploadLog.id,
+                after: { originalFileName: file.originalname, status: 'processing', file_name: fileName }
+            });
+
+            const mockJob = {
+                data: {
+                    batchId: uploadLog.id,
+                    fileBufferBase64: file.buffer.toString('base64'),
+                    verticalId,
+                    subVerticalId,
+                    uploadedBy: req.user.sub,
+                    assignedTo: targetAssignedTo || null,
+                    leadType,
+                    fileExt
+                },
+                progress: async (value) => {
+                    console.log(`[Vercel Inline Worker] Job ${uploadLog.id} progress: ${value}%`);
+                }
+            };
+
+            try {
+                const { processCsvJob } = await import('../jobs/csvProcessor.js');
+                await processCsvJob(mockJob);
+            } catch (err) {
+                console.error('❌ Vercel Inline CSV processing failed:', err);
+                await query(
+                    "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
+                    [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
+                );
+            }
+
+            return res.status(202).json({
+                success: true,
+                data: {
+                    batchId: uploadLog.id,
+                    status: 'processing',
+                    message: 'File uploaded and processed inline on Vercel.'
+                }
+            });
+        }
+
         const uploadPath = path.join(__dirname, '../../uploads', fileName);
         const uploadDir = path.dirname(uploadPath);
         if (!fs.existsSync(uploadDir)) {

@@ -852,6 +852,22 @@ export const uploadCostConversionPhoto = async (req, res) => {
             return res.status(400).json({ success: false, error: 'No file uploaded' });
         }
 
+        if (process.env.VERCEL) {
+            // Vercel Serverless environment: bypass disk writes and store the photo as a base64 Data URI in DB
+            const photoKey = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+
+            const updatedRes = await query(
+                'UPDATE cost_conversions SET geotag_photo_key = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+                [photoKey, id]
+            );
+
+            await invalidateOnLeadChange(lead.vertical_id, id);
+            broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId: lead.vertical_id, action: 'update', leadId: id });
+            logAudit(req, { action: 'cost_conversion.upload_photo_vercel', targetCollection: 'cost_conversions', targetId: id, after: { geotagPhotoKey: 'base64_data_uri' } });
+
+            return res.status(200).json({ success: true, data: updatedRes.rows[0] });
+        }
+
         const __filename = fileURLToPath(import.meta.url);
         const __dirname = path.dirname(__filename);
         const uploadsDir = path.join(__dirname, '../../../uploads');
