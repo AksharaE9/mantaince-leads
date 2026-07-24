@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import app from '../../../server/src/app.js';
 import { query } from '../../../server/src/config/db.js';
@@ -64,4 +64,11 @@ describe('Database Triggers Integration', () => {
     // Clean up
     await query('DELETE FROM cost_conversions WHERE id = $1', [leadId]);
   });
+
+  afterAll(async () => {
+    if (testVerticalId) {
+      await query('DELETE FROM verticals WHERE id = $1', [testVerticalId]);
+    }
+  });
 });
+

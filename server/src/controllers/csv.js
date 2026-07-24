@@ -1,44 +1,39 @@
 import { query } from '../config/db.js';
 import crypto from 'crypto';
 import { logAudit } from '../services/audit.js';
-import { cacheGet, withCache } from '../services/cache.js';
-import { CacheKeys, TTL } from '../lib/cacheKeys.js';
+import { cacheGet } from '../services/cache.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { sendControllerError } from '../utils/dbErrors.js';
+import { isValidUUID } from '../utils/validators/index.js';
+import { getLeadImportSchema, getAssignableAgentNames } from '../services/leadImportSchema.js';
+import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ── Base header sets (used to deduplicate custom headers) ─────────────────────
-const BASE_HEADERS_POSITIVE = new Set([
-    'DATE', 'EMPLOYEE NAME', 'BUSINESS TYPE',
-    'BUSINESS / PERSON / SHOP / COMPANY NAME',
-    'AREA', 'CITY', 'CONTACT NUMBER', 'POINT OF CONTACT',
-    'REMARKS', 'RECORDINGS', 'FOLLOW-UP REQUIRED', 'FOLLOW-UPS',
-    'FOLLOW-UP DATES', 'FOLLOW-UP REMARKS', 'REQUIREMENT IF ANY',
-    'A NOTES TO THE COS TEAM ONLY',
-]);
-
-const BASE_HEADERS_CALL = new Set([
-    'DATE', 'EMPLOYEE NAME', 'BUSINESS TYPE',
-    'BUSINESS / PERSON / SHOP / COMPANY NAME',
-    'CONTACT NUMBER', 'POINT OF CONTACT', 'AREA', 'CITY',
-    'LINK ADDRESS', 'REMARKS', 'RECORDINGS',
-    'APPOINTMENT TYPE (YES OR NO)', 'APPOINTMENT DATE',
-    'APPOINTMENT TIME', 'REQUIREMENT ORDER IF ANY',
-    'NOTES TO THE COS IF ANY',
-]);
+const SAMPLE_VALUES = {
+    date: '2026-07-24', employeeName: 'Jane Doe', businessType: 'Retail',
+    businessName: 'Acme Traders', phone: '9876543210', pointOfContact: 'Rahul Sharma',
+    area: 'Whitefield', city: 'Bengaluru', deliveredLocation: '123 Main Street',
+    remarks: 'Interested, follow up next week', recordings: '',
+    appointmentType: 'Yes', appointmentDate: '2026-08-01', appointmentTime: '11:00 AM',
+    requirement: '50 units', notes: 'Prefers WhatsApp contact',
+    followUpRequired: 'Yes', followUps: '1', followUpDates: '2026-08-05',
+    followUpRemarks: 'Awaiting budget approval',
+};
 
 /**
  * GET /leads/csv/template/:verticalId
  *
- * Generates the download CSV template from cached field configs.
- * Custom headers that clash with base columns are silently skipped
- * to prevent duplicate columns in the template.
+ * Generates the download template (CSV, or XLSX via ?format=xlsx) directly
+ * from the shared lead-import schema (services/leadImportSchema.js) — the
+ * same schema the upload validator enforces — so the template can never
+ * drift out of sync with what the backend actually accepts.
  *
- * ETag is derived from the fieldConfig cache timestamp so browsers
- * receive 304 Not Modified when nothing has changed.
+ * ETag is derived from the header list fingerprint so browsers receive a
+ * 304 Not Modified when nothing has changed.
  */
 export const downloadCsvTemplate = async (req, res) => {
     const { verticalId } = req.params;
@@ -54,30 +49,27 @@ export const downloadCsvTemplate = async (req, res) => {
             return res.status(404).json({ success: false, error: 'Vertical not found' });
         }
 
-        // Use cached field configs — same key as configs.js (shared cache hit)
-        const configs = await withCache(CacheKeys.fieldConfigs(verticalId), TTL.FIELD_CONFIGS, async () => {
-            const r = await query(
-                'SELECT field_key, csv_header, label, is_csv_mapped, display_order FROM field_configs WHERE vertical_id = $1 ORDER BY display_order ASC',
-                [verticalId]
-            );
-            return r.rows;
-        });
+        const leadType = req.query.leadType === 'POSITIVE' ? 'POSITIVE' : 'CALL';
+        const schema = await getLeadImportSchema(verticalId, leadType);
 
-        const isPositive = req.query.leadType === 'POSITIVE';
-        const baseHeaders = isPositive ? [...BASE_HEADERS_POSITIVE] : [...BASE_HEADERS_CALL];
-        const baseSet = isPositive ? BASE_HEADERS_POSITIVE : BASE_HEADERS_CALL;
+        if (req.query.format === 'xlsx') {
+            const agentNames = await getAssignableAgentNames(verticalId);
+            const workbook = await buildXlsxTemplate(schema, agentNames, SAMPLE_VALUES);
+            const buffer = await workbook.xlsx.writeBuffer();
 
-        // Only CSV-mapped field configs, deduplicated against base headers
-        const customHeaders = configs
-            .filter(c => c.is_csv_mapped)
-            .map(c => (c.csv_header || c.label || '').trim().toUpperCase())
-            .filter(h => h && !baseSet.has(h));
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename=template-${vertical.slug}-${leadType.toLowerCase()}.xlsx`);
+            res.setHeader('Cache-Control', 'private, max-age=300');
+            return res.status(200).send(Buffer.from(buffer));
+        }
 
-        const headers = [...baseHeaders, ...customHeaders];
-        const csvContent = headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',') + '\n';
+        const headers = schema.map(f => f.csvHeader);
+        const sampleRow = schema.map(f => SAMPLE_VALUES[f.key] ?? (f.type === 'enum' ? (f.options?.[0] || '') : ''));
+        const csvLine = (vals) => vals.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+        const csvContent = csvLine(headers) + '\n' + csvLine(sampleRow) + '\n';
 
         // ETag based on the header list fingerprint — prevents re-download if configs haven't changed
-        const etag = `"tpl-${Buffer.from(csvContent).toString('base64url').slice(0, 16)}"`;
+        const etag = `"tpl-${Buffer.from(csvLine(headers)).toString('base64url').slice(0, 16)}"`;
         if (req.headers['if-none-match'] === etag) {
             return res.status(304).end();
         }
@@ -88,7 +80,28 @@ export const downloadCsvTemplate = async (req, res) => {
         res.setHeader('Cache-Control', 'private, max-age=300'); // 5 min browser cache
         return res.status(200).send(csvContent);
     } catch (error) {
-        return res.status(500).json({ success: false, error: error.message });
+        return sendControllerError(res, error, 'downloadCsvTemplate');
+    }
+};
+
+/**
+ * GET /leads/csv/schema/:verticalId
+ *
+ * Exposes the shared import schema as JSON so the frontend can run the
+ * exact same required/type/enum checks client-side (fast preview) that the
+ * server enforces authoritatively on upload — no duplicated rule sets.
+ */
+export const getImportSchema = async (req, res) => {
+    const { verticalId } = req.params;
+    try {
+        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+        const leadType = req.query.leadType === 'POSITIVE' ? 'POSITIVE' : 'CALL';
+        const schema = await getLeadImportSchema(verticalId, leadType);
+        return res.status(200).json({ success: true, data: { leadType, fields: schema } });
+    } catch (error) {
+        return sendControllerError(res, error, 'getImportSchema');
     }
 };
 
@@ -100,9 +113,16 @@ export const uploadCsv = async (req, res) => {
     const file = req.file;
 
     try {
-        if (!file) return res.status(400).json({ success: false, error: 'CSV file is required' });
-        if (!verticalId) return res.status(400).json({ success: false, error: 'verticalId is required' });
-        if (!subVerticalId) return res.status(400).json({ success: false, error: 'Sub-vertical selection is mandatory for uploading leads.' });
+        if (!file) return res.status(400).json({ success: false, error: 'A CSV or Excel file is required' });
+        if (!verticalId || !isValidUUID(verticalId)) {
+            return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+        }
+        if (!subVerticalId || !isValidUUID(subVerticalId)) {
+            return res.status(400).json({ success: false, error: 'Sub-vertical selection is mandatory for uploading leads.' });
+        }
+        if (assignedTo && !isValidUUID(assignedTo)) {
+            return res.status(400).json({ success: false, error: 'Invalid assignedTo agent ID' });
+        }
 
         // Strict Vertical Scoping check
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
@@ -112,7 +132,8 @@ export const uploadCsv = async (req, res) => {
         const targetAssignedTo = (assignedTo && assignedTo.length > 0) ? assignedTo : null;
 
         const logId = crypto.randomUUID();
-        const fileName = `${logId}.csv`;
+        const fileExt = path.extname(file.originalname).toLowerCase() || '.csv';
+        const fileName = `${logId}${fileExt}`;
         const uploadPath = path.join(__dirname, '../../uploads', fileName);
         const uploadDir = path.dirname(uploadPath);
         if (!fs.existsSync(uploadDir)) {
@@ -146,7 +167,7 @@ export const uploadCsv = async (req, res) => {
             }
         });
     } catch (error) {
-        return res.status(500).json({ success: false, error: error.message });
+        return sendControllerError(res, error, 'uploadCsv');
     }
 };
 

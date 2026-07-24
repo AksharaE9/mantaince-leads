@@ -20,10 +20,10 @@ import {
   Search,
   Trash2,
   Upload,
-  CheckCircle2,
   X,
   Calendar,
   ExternalLink,
+  Database,
 } from 'lucide-react';
 import axios from '../api/axios.js';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
@@ -35,6 +35,8 @@ import toast from 'react-hot-toast';
 import GeotagCapture from '../components/GeotagCapture.jsx';
 import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
 import SearchableOperatorSelect from '../components/SearchableOperatorSelect.jsx';
+import CsvImportModal from '../components/CsvImportModal.jsx';
+import RawDataModal from '../components/RawDataModal.jsx';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
@@ -219,15 +221,11 @@ export const LeadsPage = () => {
   const [leadFormStatus, setLeadFormStatus] = useState('new');
   const [leadFormAssignedTo, setLeadFormAssignedTo] = useState('');
 
-  // CSV Import Modal states
+  // CSV/Excel Import Modal (see components/CsvImportModal.jsx)
   const [csvImportModalOpen, setCsvImportModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [assignTarget, setAssignTarget] = useState('');
-  const [uploadStatus, setUploadStatus] = useState('idle'); // 'idle' | 'uploading' | 'processing' | 'done' | 'failed'
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadResult, setUploadResult] = useState(null); // { successCount, failedCount, duplicateCount, errors }
-  const [importLeadType, setImportLeadType] = useState('CALL');
   const [leadFormSubVerticalId, setLeadFormSubVerticalId] = useState('');
+  // Raw Data feature (see components/RawDataModal.jsx)
+  const [rawDataModalOpen, setRawDataModalOpen] = useState(false);
 
   const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
 
@@ -530,11 +528,7 @@ export const LeadsPage = () => {
         const targetId = savedLead._id || savedLead.id;
         const formData = new FormData();
         formData.append('photo', leadFormGeotagFile);
-        await axios.post(`/api/v1/leads/${targetId}/photo`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        });
+        await axios.post(`/api/v1/leads/${targetId}/photo`, formData);
         toast.success('Field photo uploaded successfully.');
       }
 
@@ -657,110 +651,6 @@ export const LeadsPage = () => {
     } catch {
       toast.error('Failed to export CSV database.');
     }
-  };
-
-  // CSV Import logic
-  const handleDownloadTemplate = async () => {
-    if (!activeVertical) return;
-    try {
-      const response = await axios.get(`/api/v1/leads/csv/template/${activeVertical._id}?leadType=CALL`);
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `leads-template-${activeVertical.slug}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch {
-      toast.error('Failed to download CSV template');
-    }
-  };
-
-  const handleCsvUploadSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedFile) {
-      toast.error('Please select a CSV file first');
-      return;
-    }
-    
-    setUploadStatus('uploading');
-    setUploadProgress(10);
-
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    formData.append('verticalId', activeVertical._id);
-    formData.append('subVerticalId', leadFormSubVerticalId || subVerticalFilter || '');
-    formData.append('leadType', importLeadType);
-    if (assignTarget) {
-      formData.append('assignedTo', assignTarget);
-    }
-
-    try {
-      const res = await axios.post('/api/v1/leads/csv/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      const { batchId } = res.data.data;
-      setUploadStatus('processing');
-      setUploadProgress(40);
-
-      // Start polling status of processing
-      let intervalId = setInterval(async () => {
-        try {
-          const logRes = await axios.get(`/api/v1/leads/csv/logs/${batchId}`);
-          const log = logRes.data.data;
-          
-          if (log.status === 'done') {
-            clearInterval(intervalId);
-            setUploadProgress(100);
-            setUploadStatus('done');
-            setUploadResult({
-              batchId: log.id,
-              successCount: log.success_count || 0,
-              failedCount: log.failed_count || 0,
-              duplicateCount: log.duplicate_count || 0,
-              errors: log.errors || [],
-            });
-            toast.success('CSV import completed.');
-            fetchLeads();
-          } else if (log.status === 'failed') {
-            clearInterval(intervalId);
-            setUploadStatus('failed');
-            setUploadResult({
-              batchId: log.id,
-              successCount: log.success_count || 0,
-              failedCount: log.failed_count || 0,
-              duplicateCount: log.duplicate_count || 0,
-              errors: log.errors || [{ row: 0, reason: 'Log entry marked failed' }],
-            });
-            toast.error('CSV import failed.');
-          } else {
-            setUploadProgress(prev => Math.min(prev + 10, 95));
-          }
-        } catch (pollErr) {
-          clearInterval(intervalId);
-          setUploadStatus('failed');
-          toast.error('Failed to retrieve processing status.');
-        }
-      }, 2000);
-
-    } catch (err) {
-      setUploadStatus('failed');
-      toast.error(err.response?.data?.error || 'Failed to upload CSV file');
-    }
-  };
-
-  const handleCloseImportModal = () => {
-    setCsvImportModalOpen(false);
-    setSelectedFile(null);
-    setAssignTarget('');
-    setImportLeadType('CALL');
-    setUploadStatus('idle');
-    setUploadProgress(0);
-    setUploadResult(null);
   };
 
   const columns = useMemo(() => {
@@ -1004,6 +894,14 @@ export const LeadsPage = () => {
           </button>
           <button
             type="button"
+            onClick={() => setRawDataModalOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg hover:bg-stone-50 text-sm text-[--text-secondary] bg-white font-medium shadow-sm"
+          >
+            <Database size={16} />
+            <span>Raw Data</span>
+          </button>
+          <button
+            type="button"
             onClick={handleOpenAdd}
             className="inline-flex items-center gap-2 px-4 py-2 bg-[--accent] text-white rounded-lg font-bold text-sm hover:bg-[--accent-hover] shadow-sm transition-all"
           >
@@ -1176,220 +1074,31 @@ export const LeadsPage = () => {
         </div>
       )}
 
-      {/* CSV Import Modal */}
-      {csvImportModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">
-          <div className="glass-panel w-full max-w-lg p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-[--border] pb-3">
-              <h3 className="text-lg font-bold text-[--text-primary] flex items-center gap-2">
-                <FileSpreadsheet className="text-[--accent]" size={20} />
-                <span>Import Leads from CSV</span>
-              </h3>
-              <button onClick={handleCloseImportModal} className="p-1 border border-[--border-strong] rounded text-[--text-secondary] hover:bg-stone-50">
-                <X size={16} />
-              </button>
-            </div>
+      {/* CSV/Excel Import Modal — shared component, see components/CsvImportModal.jsx */}
+      <CsvImportModal
+        open={csvImportModalOpen}
+        onClose={() => setCsvImportModalOpen(false)}
+        vertical={activeVertical}
+        subVerticals={subVerticals}
+        defaultSubVerticalId={leadFormSubVerticalId || subVerticalFilter || ''}
+        agents={agents}
+        leadTypeOptions={[
+          { value: 'CALL', label: 'Calls' },
+          { value: 'FIELD', label: 'Field Visit' },
+        ]}
+        filenamePrefix="leads"
+        title="Import Leads"
+        onImportComplete={fetchLeads}
+      />
 
-            {uploadStatus === 'idle' && (
-              <form onSubmit={handleCsvUploadSubmit} className="space-y-4">
-                <div 
-                  className="border-2 border-dashed border-[--border-strong] rounded-xl p-8 text-center bg-stone-50/50 hover:bg-stone-50 transition-all cursor-pointer relative"
-                  onClick={() => document.getElementById('csv-file-picker').click()}
-                >
-                  <input
-                    type="file"
-                    id="csv-file-picker"
-                    accept=".csv"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
-                          toast.error('Invalid file format. Please upload a CSV file.');
-                          setSelectedFile(null);
-                        } else {
-                          setSelectedFile(file);
-                        }
-                      }
-                    }}
-                  />
-                  <Upload className="mx-auto text-[--text-muted] mb-2" size={32} />
-                  {selectedFile ? (
-                    <div>
-                      <p className="text-sm font-semibold text-[--accent]">{selectedFile.name}</p>
-                      <p className="text-xs text-[--text-secondary] mt-1">{(selectedFile.size / 1024).toFixed(1)} KB</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="text-sm font-semibold text-[--text-primary]">Click to select CSV file</p>
-                      <p className="text-xs text-[--text-secondary] mt-1">Accepts only standard .csv format spreadsheets</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FilterInput label="Select Target Sub-Vertical *">
-                    <select 
-                      required
-                      value={leadFormSubVerticalId || subVerticalFilter || ''} 
-                      onChange={(e) => setLeadFormSubVerticalId(e.target.value)} 
-                      className="w-full"
-                    >
-                      <option value="">-- Choose Sub-Vertical --</option>
-                      {subVerticals.map((sub) => (
-                        <option key={sub._id} value={sub._id}>{sub.name}</option>
-                      ))}
-                    </select>
-                  </FilterInput>
-
-                  <FilterInput label="Which type of leads">
-                    <select 
-                      value={importLeadType} 
-                      onChange={(e) => setImportLeadType(e.target.value)} 
-                      className="w-full font-semibold"
-                    >
-                      <option value="CALL">Calls</option>
-                      <option value="FIELD">Field Visit</option>
-                    </select>
-                  </FilterInput>
-
-                </div>
-
-                {/* Assign Operator row */}
-                <FilterInput label="Assign Operator (optional)">
-                  <SearchableOperatorSelect
-                    agents={agents}
-                    value={assignTarget}
-                    onChange={setAssignTarget}
-                    placeholder="-- Unassigned --"
-                  />
-                </FilterInput>
-
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    type="button"
-                    onClick={handleDownloadTemplate}
-                    className="text-xs font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
-                  >
-                    <Download size={13} />
-                    <span>Download CSV Template</span>
-                  </button>
-                  
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={handleCloseImportModal}
-                      className="px-4 py-2 border border-[--border-strong] rounded-lg text-sm text-[--text-secondary] font-semibold bg-white hover:bg-stone-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={!selectedFile}
-                      className="px-4 py-2 bg-[--accent] text-white rounded-lg font-bold text-sm hover:bg-[--accent-hover] shadow-sm disabled:opacity-40"
-                    >
-                      Import Leads
-                    </button>
-                  </div>
-                </div>
-              </form>
-            )}
-
-            {(uploadStatus === 'uploading' || uploadStatus === 'processing') && (
-              <div className="py-8 flex flex-col items-center justify-center space-y-4 text-center">
-                <Loader />
-                <div className="w-full max-w-xs space-y-1">
-                  <p className="text-sm font-semibold text-[--text-primary]">
-                    {uploadStatus === 'uploading' ? 'Uploading file to server...' : 'Processing leads in background...'}
-                  </p>
-                  <div className="w-full bg-stone-100 h-2 rounded-full overflow-hidden">
-                    <div className="bg-[--accent] h-full transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
-                  </div>
-                  <p className="text-[10px] text-[--text-secondary] font-mono">{uploadProgress}% processed</p>
-                </div>
-              </div>
-            )}
-
-            {(uploadStatus === 'done' || uploadStatus === 'failed') && uploadResult && (
-              <div className="space-y-4">
-                <div className="flex flex-col items-center text-center space-y-2 py-4">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${uploadStatus === 'done' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                    <CheckCircle2 size={28} />
-                  </div>
-                  <h4 className="text-md font-bold text-[--text-primary]">
-                    {uploadStatus === 'done' ? 'CSV Import Completed' : 'CSV Import Failed'}
-                  </h4>
-                  <p className="text-xs text-[--text-secondary]">
-                    Batch ID: <span className="font-mono">{selectedFile?.name}</span>
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="bg-green-50/50 border border-green-100 p-2.5 rounded-lg">
-                    <span className="block text-lg font-black text-green-600">{uploadResult.successCount}</span>
-                    <span className="text-[10px] text-[--text-secondary] font-semibold">Success</span>
-                  </div>
-                  <div className="bg-amber-50/50 border border-amber-100 p-2.5 rounded-lg">
-                    <span className="block text-lg font-black text-amber-500">{uploadResult.duplicateCount}</span>
-                    <span className="text-[10px] text-[--text-secondary] font-semibold">Skipped (Dup)</span>
-                  </div>
-                  <div className="bg-red-50/50 border border-red-100 p-2.5 rounded-lg">
-                    <span className="block text-lg font-black text-red-600">{uploadResult.failedCount}</span>
-                    <span className="text-[10px] text-[--text-secondary] font-semibold">Errors</span>
-                  </div>
-                </div>
-
-                {uploadResult.errors.length > 0 && (
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">Error Log Summary:</span>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            const res = await axios.get(`/api/v1/leads/csv/logs/${uploadResult.batchId}/failed-rows`, { responseType: 'blob' });
-                            const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
-                            const url = URL.createObjectURL(blob);
-                            const link = document.createElement('a');
-                            link.setAttribute('href', url);
-                            link.setAttribute('download', `error-report-${uploadResult.batchId}.csv`);
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                          } catch {
-                            toast.error('Failed to download error report.');
-                          }
-                        }}
-                        className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
-                      >
-                        <Download size={11} />
-                        <span>Download Full Error Report</span>
-                      </button>
-                    </div>
-                    <div className="border border-red-100 rounded-lg p-3 bg-red-50/20 max-h-[140px] overflow-y-auto text-xs font-mono text-red-600 space-y-1">
-                      {uploadResult.errors.slice(0, 50).map((err, idx) => (
-                        <div key={idx} className="flex gap-2">
-                          <span className="font-bold">Row {err.row}:</span>
-                          <span>{err.reason}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex justify-end pt-2">
-                  <button
-                    onClick={handleCloseImportModal}
-                    className="px-6 py-2 bg-[--accent] text-white font-bold rounded-lg text-sm hover:bg-[--accent-hover] shadow-sm"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Raw Data feature — Single Add + Bulk Upload, see components/RawDataModal.jsx */}
+      <RawDataModal
+        open={rawDataModalOpen}
+        onClose={() => setRawDataModalOpen(false)}
+        vertical={activeVertical}
+        agents={agents}
+        onSaved={fetchLeads}
+      />
 
       {leadModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">

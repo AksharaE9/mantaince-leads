@@ -1,8 +1,8 @@
-import { parse } from 'csv-parse/sync';
 import { query } from '../config/db.js';
 import crypto from 'crypto';
 import { invalidateOnLeadChange, cacheSet } from '../services/cache.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
+import { parseUploadBuffer } from '../services/spreadsheetParser.js';
 
 // ── Batch sizing ───────────────────────────────────────────────────────────────
 // 1000 rows per INSERT: matches bulkInsert.js CHUNK_SIZE, halves round-trips vs. 500.
@@ -134,7 +134,7 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
  * Queue processor function — called by worker.js for each queued CSV upload.
  */
 const processCsvJob = async (job) => {
-    const { batchId, fileBufferBase64, verticalId, uploadedBy, assignedTo, subVerticalId, leadType = 'CALL' } = job.data;
+    const { batchId, fileBufferBase64, verticalId, uploadedBy, assignedTo, subVerticalId, leadType = 'CALL', fileExt = '.csv' } = job.data;
 
     // ── 1. Resolve default assignee name ─────────────────────────────────────
     let defaultAssigneeName = '';
@@ -161,23 +161,27 @@ const processCsvJob = async (job) => {
     await emitProgress(batchId, uploadedBy, verticalId, 'processing', 0, 0, [], 0);
 
     try {
-        // ── 3. Parse CSV (sync — buffer already in memory from fs.readFileSync) ──
+        // ── 3. Parse the uploaded file (CSV or Excel — format-agnostic from here on) ──
         const buffer = Buffer.from(fileBufferBase64, 'base64');
-        const rows = parse(buffer, { columns: true, trim: true, skip_empty_lines: true });
+        const { rows, warnings } = await parseUploadBuffer(buffer, fileExt);
 
         totalRows = rows.length;
         await query('UPDATE csv_upload_logs SET total_rows = $1 WHERE id = $2', [totalRows, batchId]);
 
         if (totalRows === 0) {
             await query(
-                "UPDATE csv_upload_logs SET status = 'done', processing_finished_at = NOW() WHERE id = $1",
-                [batchId]
+                "UPDATE csv_upload_logs SET status = 'done', errors = $2, processing_finished_at = NOW() WHERE id = $1",
+                [batchId, JSON.stringify(warnings.map(w => ({ row: 0, reason: w })))]
             );
-            await emitProgress(batchId, uploadedBy, verticalId, 'done', 0, 0, [], 0);
+            await emitProgress(batchId, uploadedBy, verticalId, 'done', 0, 0, warnings.map(w => ({ row: 0, reason: w })), 0);
             return;
         }
 
-        await emitProgress(batchId, uploadedBy, verticalId, 'processing', totalRows, 0, [], 0);
+        // Sheet/format warnings (e.g. "only the first sheet was used") ride along
+        // as informational, non-fatal row-0 entries in the same errors array.
+        for (const w of warnings) errors.push({ row: 0, reason: w });
+
+        await emitProgress(batchId, uploadedBy, verticalId, 'processing', totalRows, 0, errors, 0);
 
         // ── 4. Load field configs + agent map in parallel ─────────────────────
         const [configsRes, agentsRes] = await Promise.all([

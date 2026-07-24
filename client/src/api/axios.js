@@ -35,6 +35,14 @@ instance.interceptors.request.use(
       config.headers['Authorization'] = `Bearer ${token}`;
     }
 
+    // 3. FormData uploads must not carry the instance's default
+    // 'Content-Type: application/json' header — it pre-empts the
+    // browser's automatic 'multipart/form-data; boundary=...' header,
+    // which silently breaks multer/busboy parsing on the server.
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
+
     return config;
   },
   (error) => Promise.reject(error)

@@ -1,5 +1,6 @@
 import { connectDB, query } from '../config/db.js';
 import { processCsvJob } from './csvProcessor.js';
+import { processRawDataJob } from './rawDataProcessor.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -59,14 +60,19 @@ async function startImportWorkerLoop() {
           subVerticalId: log.sub_vertical_id,
           uploadedBy: log.uploaded_by,
           assignedTo: log.assigned_to,
-          leadType: log.lead_type || 'CALL'
+          leadType: log.lead_type || 'CALL',
+          fileExt: path.extname(log.file_name || '') || '.csv'
         },
         progress: async (value) => {
           console.log(`[Worker] Job ${log.id} progress: ${value}%`);
         }
       };
 
-      await processCsvJob(mockJob);
+      if (log.entity_type === 'raw_data') {
+        await processRawDataJob(mockJob);
+      } else {
+        await processCsvJob(mockJob);
+      }
       console.log(`✅ Job finished successfully: Batch ${log.id}`);
 
     } catch (error) {

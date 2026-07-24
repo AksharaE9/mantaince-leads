@@ -15,6 +15,7 @@ import { CacheKeys, TTL } from '../lib/cacheKeys.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { z } from 'zod';
 import { bulkInsert } from '../db/bulkInsert.js';
+import { sendControllerError } from '../utils/dbErrors.js';
 
 // ── CSV escape helper (module-level, reused by export) ────────────────────────
 const escapeCsvVal = (val) => {
@@ -239,7 +240,7 @@ export const getCostConversions = async (req, res) => {
 
         return res.status(200).json(response);
     } catch (error) {
-        return res.status(500).json({ success: false, error: error.message });
+        return sendControllerError(res, error, 'getCostConversions');
     }
 };
 

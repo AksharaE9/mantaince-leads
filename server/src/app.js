@@ -21,6 +21,7 @@ import reportsRouter from './routes/reports.js';
 import assignmentsRouter from './routes/assignments.js';
 import adminRouter from './routes/admin.js';
 import followUpsRouter from './routes/followUps.js';
+import rawDataRouter from './routes/rawData.js';
 import { startImportWorkerLoop } from './jobs/worker.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -113,6 +114,15 @@ app.use(cookieParser());
 app.set('etag', 'weak');
 
 // MongoDB Compatibility Helper: Recursively copy 'id' to '_id' and convert snake_case to camelCase keys
+const camelCaseCache = {};
+const toCamelCase = (str) => {
+  if (!str.includes('_')) return str;
+  if (camelCaseCache[str]) return camelCaseCache[str];
+  const camel = str.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+  camelCaseCache[str] = camel;
+  return camel;
+};
+
 const mapIdToUnderscoreId = (obj) => {
   if (obj === null || obj === undefined) return obj;
   if (Array.isArray(obj)) {
@@ -125,7 +135,7 @@ const mapIdToUnderscoreId = (obj) => {
     const newObj = {};
     for (const key of Object.keys(obj)) {
       if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
-      const camelKey = key.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+      const camelKey = toCamelCase(key);
       const mappedVal = mapIdToUnderscoreId(obj[key]);
       newObj[key] = mappedVal;
       if (camelKey !== key && camelKey !== '__proto__' && camelKey !== 'constructor' && camelKey !== 'prototype') {
@@ -145,12 +155,7 @@ app.use((req, res, next) => {
   res.json = function (body) {
     if (body !== null && body !== undefined && typeof body === 'object') {
       if (body.success && body.data !== undefined) {
-        // Fast-path: skip expensive recursive transform for large array responses
-        // (paginated leads lists). Frontend handles snake_case from these endpoints.
-        const isLargeArray = Array.isArray(body.data) && body.data.length > 10;
-        if (!isLargeArray) {
-          body.data = mapIdToUnderscoreId(body.data);
-        }
+        body.data = mapIdToUnderscoreId(body.data);
       } else {
         body = mapIdToUnderscoreId(body);
       }
@@ -182,6 +187,7 @@ app.use('/api/v1/reports', reportsRouter);
 app.use('/api/v1/assignments', assignmentsRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/followUps', followUpsRouter);
+app.use('/api/v1/raw-data', rawDataRouter);
 
 // Serve static uploads with caching headers
 app.use('/uploads', express.static(path.join(__dirname, '../../uploads'), {
@@ -226,6 +232,24 @@ app.use((err, req, res, next) => {
     return res.status(413).json({
       success: false,
       error: 'File upload size exceeds the maximum limit (10MB).'
+    });
+  }
+
+  // Malformed multipart body (e.g. missing/invalid boundary) — surfaces as a
+  // plain busboy/multer error with no .status, not a genuine server fault.
+  if (/multipart|boundary/i.test(err.message || '')) {
+    return res.status(400).json({
+      success: false,
+      error: 'Malformed file upload request — please try again.'
+    });
+  }
+
+  // Explicit 4xx raised deliberately by route/middleware logic (e.g. multer
+  // fileFilter rejections) — surface the real message, not a generic 500.
+  if (err.status && err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({
+      success: false,
+      error: err.message || 'Invalid request'
     });
   }
 

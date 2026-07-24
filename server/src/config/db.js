@@ -113,8 +113,11 @@ const checkSchemaReady = async () => {
                 SELECT 1 FROM information_schema.columns 
                 WHERE table_name = 'csv_upload_logs' AND column_name = 'lead_type'
             ) AND EXISTS (
-                SELECT 1 FROM information_schema.columns 
+                SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'users' AND column_name = 'is_approved'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'raw_data'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -512,6 +515,35 @@ const runMigrations = async () => {
                 ALTER TABLE user_assignments ADD CONSTRAINT user_assignments_user_id_sub_vertical_id_key UNIQUE (user_id, sub_vertical_id);
             END IF;
         END $$;
+
+        -- Discriminates csv_upload_logs batches by target entity so the same
+        -- upload/queue/worker plumbing serves both Leads and Raw Data.
+        -- Existing rows are all lead imports, hence the 'lead' default.
+        ALTER TABLE csv_upload_logs ADD COLUMN IF NOT EXISTS entity_type VARCHAR(20) NOT NULL DEFAULT 'lead';
+
+        CREATE TABLE IF NOT EXISTS raw_data (
+            id UUID PRIMARY KEY,
+            vertical_id UUID NOT NULL REFERENCES verticals(id) ON DELETE CASCADE,
+            assigned_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            date DATE,
+            business_type VARCHAR(255),
+            business_name VARCHAR(255) NOT NULL,
+            area VARCHAR(255),
+            city VARCHAR(255),
+            phone_number VARCHAR(50),
+            address TEXT,
+            appointment_date DATE,
+            appointment_timings VARCHAR(100),
+            remarks TEXT,
+            source VARCHAR(20) NOT NULL DEFAULT 'single_add',
+            csv_batch_id UUID REFERENCES csv_upload_logs(id) ON DELETE SET NULL,
+            created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            is_deleted BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_raw_data_vertical ON raw_data(vertical_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_raw_data_phone ON raw_data(vertical_id, phone_number);
     `;
 
     // ── Phase 2: Performance Indexes ─────────────────────────────────────────

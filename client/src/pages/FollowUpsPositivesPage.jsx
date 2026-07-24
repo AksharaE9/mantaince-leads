@@ -35,6 +35,7 @@ import toast from 'react-hot-toast';
 import GeotagCapture from '../components/GeotagCapture.jsx';
 import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
 import SearchableOperatorSelect from '../components/SearchableOperatorSelect.jsx';
+import CsvImportModal from '../components/CsvImportModal.jsx';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
@@ -214,16 +215,10 @@ export const FollowUpsPositivesPage = () => {
   const [leadFormGeotagFile, setLeadFormGeotagFile] = useState(null);
   const [leadFormStatus, setLeadFormStatus] = useState('new');
 
-  // CSV Import Modal states
+  // CSV/Excel Import Modal (see components/CsvImportModal.jsx)
   const [csvImportModalOpen, setCsvImportModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [assignTarget, setAssignTarget] = useState('');
-  const [uploadStatus, setUploadStatus] = useState('idle');
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadResult, setUploadResult] = useState(null);
   const [leadFormSubVerticalId, setLeadFormSubVerticalId] = useState('');
   const [leadFormLeadType, setLeadFormLeadType] = useState('POSITIVE');
-  const [importLeadType, setImportLeadType] = useState('POSITIVE');
 
   const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
 
@@ -563,11 +558,7 @@ export const FollowUpsPositivesPage = () => {
         const targetId = savedLead._id || savedLead.id;
         const formData = new FormData();
         formData.append('photo', leadFormGeotagFile);
-        await axios.post(`/api/v1/leads/${targetId}/photo`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        });
+        await axios.post(`/api/v1/leads/${targetId}/photo`, formData);
         toast.success('Field photo uploaded successfully.');
       }
 
@@ -693,108 +684,6 @@ export const FollowUpsPositivesPage = () => {
     } catch {
       toast.error('Failed to export CSV database.');
     }
-  };
-
-  const handleDownloadTemplate = async () => {
-    if (!activeVertical) return;
-    try {
-      const response = await axios.get(`/api/v1/leads/csv/template/${activeVertical._id}?leadType=POSITIVE`);
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `positives-template-${activeVertical.slug}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch {
-      toast.error('Failed to download CSV template');
-    }
-  };
-
-  const handleCsvUploadSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedFile) {
-      toast.error('Please select a CSV file first');
-      return;
-    }
-    
-    setUploadStatus('uploading');
-    setUploadProgress(10);
-
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    formData.append('verticalId', activeVertical._id);
-    formData.append('subVerticalId', leadFormSubVerticalId || subVerticalFilter || '');
-    formData.append('leadType', 'POSITIVE');
-    if (assignTarget) {
-      formData.append('assignedTo', assignTarget);
-    }
-
-    try {
-      const res = await axios.post('/api/v1/leads/csv/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      const { batchId } = res.data.data;
-      setUploadStatus('processing');
-      setUploadProgress(40);
-
-      let intervalId = setInterval(async () => {
-        try {
-          const logRes = await axios.get(`/api/v1/leads/csv/logs/${batchId}`);
-          const log = logRes.data.data;
-          
-          if (log.status === 'done') {
-            clearInterval(intervalId);
-            setUploadProgress(100);
-            setUploadStatus('done');
-            setUploadResult({
-              batchId: log.id,
-              successCount: log.success_count || 0,
-              failedCount: log.failed_count || 0,
-              duplicateCount: log.duplicate_count || 0,
-              errors: log.errors || [],
-            });
-            toast.success('CSV import completed.');
-            fetchLeads();
-            fetchTodayCount();
-          } else if (log.status === 'failed') {
-            clearInterval(intervalId);
-            setUploadStatus('failed');
-            setUploadResult({
-              batchId: log.id,
-              successCount: log.success_count || 0,
-              failedCount: log.failed_count || 0,
-              duplicateCount: log.duplicate_count || 0,
-              errors: log.errors || [{ row: 0, reason: 'Log entry marked failed' }],
-            });
-            toast.error('CSV import failed.');
-          } else {
-            setUploadProgress(prev => Math.min(prev + 10, 95));
-          }
-        } catch (pollErr) {
-          clearInterval(intervalId);
-          setUploadStatus('failed');
-          toast.error('Failed to retrieve processing status.');
-        }
-      }, 2000);
-
-    } catch (err) {
-      setUploadStatus('failed');
-      toast.error(err.response?.data?.error || 'Failed to upload CSV file');
-    }
-  };
-
-  const handleCloseImportModal = () => {
-    setCsvImportModalOpen(false);
-    setSelectedFile(null);
-    setAssignTarget('');
-    setUploadStatus('idle');
-    setUploadProgress(0);
-    setUploadResult(null);
   };
 
   const formatLocalDate = (date) => {
@@ -1789,177 +1678,22 @@ export const FollowUpsPositivesPage = () => {
         </div>
       )}
 
-      {/* CSV Import Modal */}
-      {csvImportModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 shadow-xl">
-            <div className="flex justify-between items-center border-b border-stone-200 pb-3">
-              <h3 className="text-base font-black uppercase text-[--text-primary]">
-                Import CSV Database
-              </h3>
-              <button
-                type="button"
-                onClick={handleCloseImportModal}
-                className="text-stone-400 hover:text-stone-600 bg-transparent border-0 outline-none cursor-pointer p-1 rounded-md hover:bg-stone-100 transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCsvUploadSubmit} className="space-y-4">
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-black uppercase text-[--text-secondary]">
-                  1. Download Format Template
-                </span>
-                <button
-                  type="button"
-                  onClick={handleDownloadTemplate}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 border border-[--border-strong] rounded-lg text-xs font-bold text-[--text-secondary] hover:bg-stone-50 shadow-sm bg-white cursor-pointer"
-                >
-                  <Download size={14} />
-                  <span>Download CSV Template</span>
-                </button>
-              </div>
-
-              {!subVerticalFilter && (
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[10px] font-black uppercase text-[--text-secondary]">
-                    2. Map Sub-vertical *
-                  </span>
-                  <select
-                    required
-                    value={leadFormSubVerticalId || subVerticalFilter || ''}
-                    onChange={(e) => setLeadFormSubVerticalId(e.target.value)}
-                    className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
-                  >
-                    <option value="">-- Choose Sub-vertical --</option>
-                    {subVerticals.map(sub => (
-                      <option key={sub._id} value={sub._id}>{sub.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-black uppercase text-[--text-secondary]">
-                  3. Select CSV file *
-                </span>
-                <input
-                  type="file"
-                  required
-                  accept=".csv"
-                  onChange={(e) => setSelectedFile(e.target.files[0])}
-                  className="w-full border border-stone-300 rounded-lg p-2 text-xs focus:outline-none"
-                />
-              </div>
-
-              {/* Assign Operator for all imported rows */}
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-black uppercase text-[--text-secondary]">
-                  4. Assign Operator (applies to all rows)
-                </span>
-                <SearchableOperatorSelect
-                  agents={agents}
-                  value={assignTarget}
-                  onChange={setAssignTarget}
-                  placeholder="— Select operator —"
-                />
-                <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                  The selected operator will be auto-assigned to every imported row.
-                </small>
-              </div>
-
-
-
-              {uploadStatus !== 'idle' && (
-                <div className="space-y-1.5 border border-stone-200 p-3 rounded-lg bg-stone-50">
-                  <div className="flex justify-between items-center text-[10px] font-bold uppercase text-[--text-secondary]">
-                    <span>Status: {uploadStatus}</span>
-                    <span>{uploadProgress}%</span>
-                  </div>
-                  <div className="w-full bg-stone-200 h-2 rounded-full overflow-hidden">
-                    <div className="bg-[--accent] h-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
-                  </div>
-
-                  {uploadResult && (
-                    <div className="space-y-4 pt-1.5 border-t border-stone-200 mt-1.5">
-                      <div className="grid grid-cols-3 gap-2 text-center">
-                        <div className="bg-emerald-50/50 border border-emerald-100 p-2.5 rounded-lg">
-                          <span className="block text-lg font-black text-emerald-600">{uploadResult.successCount}</span>
-                          <span className="text-[10px] text-[--text-secondary] font-semibold">Success</span>
-                        </div>
-                        <div className="bg-amber-50/50 border border-amber-100 p-2.5 rounded-lg">
-                          <span className="block text-lg font-black text-amber-500">{uploadResult.duplicateCount}</span>
-                          <span className="text-[10px] text-[--text-secondary] font-semibold">Skipped (Dup)</span>
-                        </div>
-                        <div className="bg-red-50/50 border border-red-100 p-2.5 rounded-lg">
-                          <span className="block text-lg font-black text-red-600">{uploadResult.failedCount}</span>
-                          <span className="text-[10px] text-[--text-secondary] font-semibold">Errors</span>
-                        </div>
-                      </div>
-                      
-                      {uploadResult.errors && uploadResult.errors.length > 0 && (
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">Error Log Summary:</span>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  const res = await axios.get(`/api/v1/leads/csv/logs/${uploadResult.batchId}/failed-rows`, { responseType: 'blob' });
-                                  const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
-                                  const url = URL.createObjectURL(blob);
-                                  const link = document.createElement('a');
-                                  link.setAttribute('href', url);
-                                  link.setAttribute('download', `failed-rows-${uploadResult.batchId}.csv`);
-                                  document.body.appendChild(link);
-                                  link.click();
-                                  document.body.removeChild(link);
-                                } catch {
-                                  toast.error('Failed to download error log');
-                                }
-                              }}
-                              className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
-                            >
-                              <Download size={11} />
-                              <span>Download Full Error Report</span>
-                            </button>
-                          </div>
-                          <div className="border border-red-100 rounded-lg p-3 bg-red-50/20 max-h-[140px] overflow-y-auto text-xs font-mono text-red-600 space-y-1">
-                            {uploadResult.errors.slice(0, 50).map((err, idx) => (
-                              <div key={idx} className="flex gap-2">
-                                <span className="font-bold">Row {err.row}:</span>
-                                <span>{err.reason}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 border-t border-stone-200 pt-4">
-                <button
-                  type="button"
-                  onClick={handleCloseImportModal}
-                  className="px-4 py-2 border border-stone-300 text-xs font-semibold rounded-lg hover:bg-stone-50 bg-white cursor-pointer"
-                >
-                  Close
-                </button>
-                <button
-                  type="submit"
-                  disabled={uploadStatus === 'uploading' || uploadStatus === 'processing'}
-                  className="px-5 py-2 bg-[--accent] hover:bg-[--accent-hover] text-white font-bold text-xs rounded-lg transition-all uppercase tracking-wide cursor-pointer disabled:opacity-40"
-                >
-                  Upload & Import
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* CSV/Excel Import Modal — shared component, see components/CsvImportModal.jsx */}
+      <CsvImportModal
+        open={csvImportModalOpen}
+        onClose={() => setCsvImportModalOpen(false)}
+        vertical={activeVertical}
+        subVerticals={subVerticals}
+        defaultSubVerticalId={leadFormSubVerticalId || subVerticalFilter || ''}
+        agents={agents}
+        leadType="POSITIVE"
+        filenamePrefix="positives"
+        title="Import Positive Leads"
+        onImportComplete={() => {
+          fetchLeads();
+          fetchTodayCount();
+        }}
+      />
 
       {/* Bulk Delete Confirm Dialog */}
       <ConfirmDialog
