@@ -11,6 +11,19 @@ export const sendControllerError = (res, error, context = '') => {
     console.error('❌ Controller error:', error);
   }
 
+  if (global.debugErrors) {
+    global.debugErrors.unshift({
+      timestamp: new Date().toISOString(),
+      type: 'controller_error',
+      context,
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      detail: error.detail
+    });
+    if (global.debugErrors.length > 50) global.debugErrors.pop();
+  }
+
   // Invalid input syntax (e.g. malformed UUID/date reaching the DB layer)
   if (error.code === '22P02') {
     return res.status(400).json({ success: false, error: 'Invalid request: malformed identifier or value' });
@@ -33,10 +46,11 @@ export const sendControllerError = (res, error, context = '') => {
     return res.status(400).json({ success: false, error: `Missing required field: ${error.column || 'unknown'}` });
   }
 
-  const response = { success: false, error: 'An internal server error occurred' };
-  if (process.env.NODE_ENV !== 'production') {
-    response.details = error.message;
-  }
+  const response = { 
+    success: false, 
+    error: 'An internal server error occurred',
+    details: error.stack || error.message
+  };
   return res.status(500).json(response);
 };
 

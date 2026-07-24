@@ -189,6 +189,27 @@ app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/followUps', followUpsRouter);
 app.use('/api/v1/raw-data', rawDataRouter);
 
+// Global list to store the last 50 server-side errors in memory for diagnostics
+global.debugErrors = global.debugErrors || [];
+
+app.get('/api/v1/debug-errors', (req, res) => {
+  res.status(200).json({
+    success: true,
+    vercel: !!process.env.VERCEL,
+    env: {
+      NODE_ENV: process.env.NODE_ENV,
+      PGHOST: process.env.PGHOST ? 'DEFINED' : 'UNDEFINED',
+      PGUSER: process.env.PGUSER ? 'DEFINED' : 'UNDEFINED',
+      PGDATABASE: process.env.PGDATABASE ? 'DEFINED' : 'UNDEFINED',
+      PGPORT: process.env.PGPORT ? 'DEFINED' : 'UNDEFINED',
+      PORT: process.env.PORT ? 'DEFINED' : 'UNDEFINED',
+      CLIENT_URL: process.env.CLIENT_URL,
+      USE_RDS_IAM: process.env.USE_RDS_IAM
+    },
+    errors: global.debugErrors || []
+  });
+});
+
 // Serve static uploads with caching headers
 app.use('/uploads', express.static(path.join(__dirname, '../../uploads'), {
   maxAge: '1d', // 1 day public cache
@@ -208,6 +229,18 @@ app.get('/', (req, res) => {
 // 5. Global Error Handling Middleware (Section 11 specifications)
 app.use((err, req, res, next) => {
   console.error('❌ Server Error Context:', err);
+
+  if (global.debugErrors) {
+    global.debugErrors.unshift({
+      timestamp: new Date().toISOString(),
+      type: 'unhandled_server_error',
+      message: err.message,
+      stack: err.stack,
+      code: err.code,
+      detail: err.detail
+    });
+    if (global.debugErrors.length > 50) global.debugErrors.pop();
+  }
 
   // PostgreSQL Unique Violation (code 23505)
   if (err.code === '23505') {
@@ -256,12 +289,9 @@ app.use((err, req, res, next) => {
   // Fallback internal error
   const response = {
     success: false,
-    error: 'An internal server error occurred during transaction processing.'
+    error: 'An internal server error occurred during transaction processing.',
+    details: err.stack || err.message
   };
-
-  if (process.env.NODE_ENV !== 'production') {
-    response.details = err.stack || err.message;
-  }
 
   return res.status(err.status || 500).json(response);
 });
