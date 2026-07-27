@@ -326,16 +326,16 @@ export const uploadRawDataCsv = async (req, res) => {
                 }
             };
 
-            try {
-                const { processRawDataJob } = await import('../jobs/rawDataProcessor.js');
-                await processRawDataJob(mockJob);
-            } catch (err) {
-                console.error('❌ Vercel Inline RawData processing failed:', err);
-                await query(
-                    "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
-                    [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
-                );
-            }
+            // Kick off RawData processing in the background (non-blocking for Vercel)
+            import('../jobs/rawDataProcessor.js')
+                .then(({ processRawDataJob }) => processRawDataJob(mockJob))
+                .catch(async (err) => {
+                    console.error('❌ Vercel Inline RawData processing failed:', err);
+                    await query(
+                        "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
+                        [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
+                    ).catch(() => {});
+                });
 
             return res.status(202).json({
                 success: true,

@@ -320,7 +320,7 @@ describe('Delivery Data API', () => {
             expect(finalLog.status).toBe('done');
             expect(finalLog.success_count).toBe(1);
             expect(finalLog.duplicate_count).toBe(1);
-            expect(finalLog.failed_count).toBeGreaterThanOrEqual(2); // unresolvable employee + exact-duplicate event
+            expect(finalLog.failed_count).toBe(1); // unresolvable employee (duplicates are tracked separately now)
 
             const inserted = await query('SELECT * FROM delivery_data WHERE csv_batch_id = $1', [batchId]);
             expect(inserted.rows).toHaveLength(1);

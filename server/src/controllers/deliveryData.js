@@ -327,16 +327,16 @@ export const uploadDeliveryDataCsv = async (req, res) => {
                 }
             };
 
-            try {
-                const { processDeliveryDataJob } = await import('../jobs/deliveryDataProcessor.js');
-                await processDeliveryDataJob(mockJob);
-            } catch (err) {
-                console.error('❌ Vercel Inline DeliveryData processing failed:', err);
-                await query(
-                    "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
-                    [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
-                );
-            }
+            // Kick off DeliveryData processing in the background (non-blocking for Vercel)
+            import('../jobs/deliveryDataProcessor.js')
+                .then(({ processDeliveryDataJob }) => processDeliveryDataJob(mockJob))
+                .catch(async (err) => {
+                    console.error('❌ Vercel Inline DeliveryData processing failed:', err);
+                    await query(
+                        "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
+                        [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
+                    ).catch(() => {});
+                });
 
             return res.status(202).json({
                 success: true,

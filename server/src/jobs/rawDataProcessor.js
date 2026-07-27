@@ -116,12 +116,15 @@ export const processRawDataJob = async (job) => {
         let existingPhones = [];
         if (uniquePhones.length > 0) {
             const existingRes = await query(
-                'SELECT phone_number FROM raw_data WHERE vertical_id = $1 AND is_deleted = false AND phone_number = ANY($2)',
+                `SELECT phone_number FROM raw_data 
+                 WHERE vertical_id = $1 AND is_deleted = false 
+                   AND regexp_replace(phone_number, '[^\\d+]', '', 'g') = ANY($2)`,
                 [verticalId, uniquePhones]
             );
-            existingPhones = existingRes.rows.map(r => r.phone_number);
+            existingPhones = existingRes.rows.map(r => r.phone_number.replace(/[^\d+]/g, ''));
         }
         const phoneSet = new Set(existingPhones);
+        const rowOutcomes = [];
 
         const validRows = [];
         rows.forEach((rawRow, idx) => {
@@ -132,14 +135,18 @@ export const processRawDataJob = async (job) => {
             for (const w of rowWarnings) warnings.push({ row: rowNum, field: w.field, reason: w.message });
 
             if (rowErrors.length > 0) {
-                errors.push({ row: rowNum, reason: rowErrors.map(e => e.message).join('; '), originalRow: rawRow });
+                const reason = rowErrors.map(e => e.message).join('; ');
+                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                rowOutcomes.push({ row: rowNum, status: 'failed', reason });
                 return;
             }
 
             const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
             if (phoneSet.has(phone)) {
                 duplicateCount++;
-                errors.push({ row: rowNum, reason: 'Duplicate: contact number already exists', originalRow: rawRow });
+                const reason = 'Duplicate: contact number already exists';
+                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                rowOutcomes.push({ row: rowNum, status: 'duplicate', reason });
                 return;
             }
             phoneSet.add(phone);
@@ -161,6 +168,8 @@ export const processRawDataJob = async (job) => {
                 source: 'bulk_upload',
                 csv_batch_id: batchId,
                 created_by: uploadedBy,
+                csvRowNum: rowNum,
+                originalRow: rawRow,
             });
         });
 
@@ -170,28 +179,51 @@ export const processRawDataJob = async (job) => {
             try {
                 const inserted = await bulkInsert({ query }, 'raw_data', RAW_DATA_COLUMNS, chunkRows, { onConflict: '' });
                 successCount += inserted.length;
-            } catch {
+                for (const r of chunk) {
+                    rowOutcomes.push({ row: r.csvRowNum, status: 'success', id: r.id });
+                }
+            } catch (chunkErr) {
                 // Fall back row-by-row so one bad row never sinks the whole chunk.
                 for (const r of chunk) {
                     try {
                         await bulkInsert({ query }, 'raw_data', RAW_DATA_COLUMNS, [RAW_DATA_COLUMNS.map(c => r[c])], { onConflict: '' });
                         successCount += 1;
+                        rowOutcomes.push({ row: r.csvRowNum, status: 'success', id: r.id });
                     } catch (singleErr) {
-                        const isDup = singleErr.code === '23505';
-                        errors.push({ row: 0, reason: `Insert failed for ${r.business_name}: ${isDup ? 'Duplicate: contact number already exists' : singleErr.message}` });
+                        const rawErr = singleErr.cause || singleErr;
+                        const isDup = rawErr.code === '23505';
+                        const reason = isDup ? 'Duplicate: contact number already exists' : rawErr.message;
+                        if (isDup) {
+                            duplicateCount++;
+                            errors.push({ row: r.csvRowNum, reason, originalRow: r.originalRow });
+                            rowOutcomes.push({ row: r.csvRowNum, status: 'duplicate', reason });
+                        } else {
+                            errors.push({ row: r.csvRowNum, reason: `Insert failed for ${r.business_name}: ${reason}`, originalRow: r.originalRow });
+                            rowOutcomes.push({ row: r.csvRowNum, status: 'failed', reason });
+                        }
                     }
                 }
             }
             await emitProgress(batchId, uploadedBy, verticalId, 'processing', totalRows, successCount, errors, duplicateCount);
         }
 
+        const outcomeSuccess = rowOutcomes.filter(o => o.status === 'success').length;
+        const outcomeDuplicate = rowOutcomes.filter(o => o.status === 'duplicate').length;
+        const outcomeFailed = rowOutcomes.filter(o => o.status === 'failed').length;
+        const outcomeTotal = outcomeSuccess + outcomeDuplicate + outcomeFailed;
+
+        console.log(`[RawData Processor] Batch final report: total=${totalRows}, outcomes=${outcomeTotal} (success=${outcomeSuccess}, duplicates=${outcomeDuplicate}, failed=${outcomeFailed})`);
+        if (outcomeTotal !== totalRows) {
+            console.error(`[RawData Processor] MISMATCH warning: totalRows (${totalRows}) !== outcomeTotal (${outcomeTotal})`);
+        }
+
+        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, errors, duplicateCount);
         await query(`
             UPDATE csv_upload_logs
             SET status = 'done', success_count = $1, failed_count = $2, duplicate_count = $3, errors = $4, processing_finished_at = NOW()
             WHERE id = $5
-        `, [successCount, errors.length, duplicateCount, JSON.stringify([...errors, ...warnings.map(w => ({ ...w, warning: true }))]), batchId]);
+        `, [successCount, outcomeFailed, duplicateCount, JSON.stringify([...errors, ...warnings.map(w => ({ ...w, warning: true }))]), batchId]);
 
-        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, errors, duplicateCount);
         broadcastToAll({ type: 'RAW_DATA_MUTATED', verticalId, action: 'bulk_upload', batchId });
     } catch (error) {
         console.error('❌ Raw Data Job Processing Failed:', error.message);

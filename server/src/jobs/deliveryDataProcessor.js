@@ -68,9 +68,10 @@ function toDateOrNull(value) {
 // documented in CLAUDE.md, and is sufficient to catch the actual target case
 // (the exact same file/row re-uploaded), which is all this key needs to do.
 function deliveryDupKey(phone, deliveryDateValue, deliveryTimeValue) {
+    const p = String(phone || '').replace(/[^\d+]/g, '');
     const d = String(deliveryDateValue || '').trim().toLowerCase();
     const t = String(deliveryTimeValue || '').trim().toLowerCase();
-    return `${phone}|${d}|${t}`;
+    return `${p}|${d}|${t}`;
 }
 
 async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, successCount, errorsArr, duplicateCount) {
@@ -125,7 +126,6 @@ export const processDeliveryDataJob = async (job) => {
             return;
         }
 
-        // Fetched once per batch, not per row — same discipline as rawDataProcessor.js.
         const [agents, knownBusinessTypes] = await Promise.all([
             getAssignableAgents(verticalId),
             getKnownBusinessTypes(verticalId),
@@ -142,7 +142,9 @@ export const processDeliveryDataJob = async (job) => {
             // Date-object timezone-reinterpretation ambiguity entirely.
             const existingRes = await query(
                 `SELECT phone_number, to_char(delivery_date, 'YYYY-MM-DD') AS delivery_date_str, delivery_time
-                 FROM delivery_data WHERE vertical_id = $1 AND is_deleted = false AND phone_number = ANY($2)`,
+                 FROM delivery_data 
+                 WHERE vertical_id = $1 AND is_deleted = false 
+                   AND regexp_replace(phone_number, '[^\\d+]', '', 'g') = ANY($2)`,
                 [verticalId, uniquePhones]
             );
             existingDupKeys = new Set(existingRes.rows.map(r =>
@@ -150,6 +152,7 @@ export const processDeliveryDataJob = async (job) => {
             ));
         }
         const dupKeySet = new Set(existingDupKeys);
+        const rowOutcomes = [];
 
         // linkedRawDataId — batched match against raw_data (one query per key, not per row).
         const businessNames = normalizedRows.map(r => r.businessName);
@@ -164,7 +167,9 @@ export const processDeliveryDataJob = async (job) => {
             for (const w of rowWarnings) warnings.push({ row: rowNum, field: w.field, reason: w.message });
 
             if (rowErrors.length > 0) {
-                errors.push({ row: rowNum, reason: rowErrors.map(e => e.message).join('; '), originalRow: rawRow });
+                const reason = rowErrors.map(e => e.message).join('; ');
+                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                rowOutcomes.push({ row: rowNum, status: 'failed', reason });
                 return;
             }
 
@@ -172,7 +177,9 @@ export const processDeliveryDataJob = async (job) => {
             const dupKey = deliveryDupKey(phone, row.deliveryDate, row.deliveryTime);
             if (dupKeySet.has(dupKey)) {
                 duplicateCount++;
-                errors.push({ row: rowNum, reason: 'Duplicate: same phone number, delivery date, and delivery time already exists', originalRow: rawRow });
+                const reason = 'Duplicate: same phone number, delivery date, and delivery time already exists';
+                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                rowOutcomes.push({ row: rowNum, status: 'duplicate', reason });
                 return;
             }
             dupKeySet.add(dupKey);
@@ -200,6 +207,8 @@ export const processDeliveryDataJob = async (job) => {
                 source: 'bulk_upload',
                 csv_batch_id: batchId,
                 created_by: uploadedBy,
+                csvRowNum: rowNum,
+                originalRow: rawRow,
             });
         });
 
@@ -209,26 +218,50 @@ export const processDeliveryDataJob = async (job) => {
             try {
                 const inserted = await bulkInsert({ query }, 'delivery_data', DELIVERY_DATA_COLUMNS, chunkRows, { onConflict: '' });
                 successCount += inserted.length;
-            } catch {
+                for (const r of chunk) {
+                    rowOutcomes.push({ row: r.csvRowNum, status: 'success', id: r.id });
+                }
+            } catch (chunkErr) {
                 // Fall back row-by-row so one bad row never sinks the whole chunk.
                 for (const r of chunk) {
                     try {
                         await bulkInsert({ query }, 'delivery_data', DELIVERY_DATA_COLUMNS, [DELIVERY_DATA_COLUMNS.map(c => r[c])], { onConflict: '' });
                         successCount += 1;
+                        rowOutcomes.push({ row: r.csvRowNum, status: 'success', id: r.id });
                     } catch (singleErr) {
-                        const isDup = singleErr.code === '23505';
-                        errors.push({ row: 0, reason: `Insert failed for ${r.business_name}: ${isDup ? 'Duplicate: same phone number, delivery date, and delivery time already exists' : singleErr.message}` });
+                        const rawErr = singleErr.cause || singleErr;
+                        const isDup = rawErr.code === '23505';
+                        const reason = isDup ? 'Duplicate: same phone number, delivery date, and delivery time already exists' : rawErr.message;
+                        if (isDup) {
+                            duplicateCount++;
+                            errors.push({ row: r.csvRowNum, reason, originalRow: r.originalRow });
+                            rowOutcomes.push({ row: r.csvRowNum, status: 'duplicate', reason });
+                        } else {
+                            errors.push({ row: r.csvRowNum, reason: `Insert failed for ${r.business_name}: ${reason}`, originalRow: r.originalRow });
+                            rowOutcomes.push({ row: r.csvRowNum, status: 'failed', reason });
+                        }
                     }
                 }
             }
             await emitProgress(batchId, uploadedBy, verticalId, 'processing', totalRows, successCount, errors, duplicateCount);
         }
 
+        const outcomeSuccess = rowOutcomes.filter(o => o.status === 'success').length;
+        const outcomeDuplicate = rowOutcomes.filter(o => o.status === 'duplicate').length;
+        const outcomeFailed = rowOutcomes.filter(o => o.status === 'failed').length;
+        const outcomeTotal = outcomeSuccess + outcomeDuplicate + outcomeFailed;
+
+        console.log(`[DeliveryData Processor] Batch final report: total=${totalRows}, outcomes=${outcomeTotal} (success=${outcomeSuccess}, duplicates=${outcomeDuplicate}, failed=${outcomeFailed})`);
+        if (outcomeTotal !== totalRows) {
+            console.error(`[DeliveryData Processor] MISMATCH warning: totalRows (${totalRows}) !== outcomeTotal (${outcomeTotal})`);
+        }
+
+        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, errors, duplicateCount);
         await query(`
             UPDATE csv_upload_logs
             SET status = 'done', success_count = $1, failed_count = $2, duplicate_count = $3, errors = $4, processing_finished_at = NOW()
             WHERE id = $5
-        `, [successCount, errors.length, duplicateCount, JSON.stringify([...errors, ...warnings.map(w => ({ ...w, warning: true }))]), batchId]);
+        `, [successCount, outcomeFailed, duplicateCount, JSON.stringify([...errors, ...warnings.map(w => ({ ...w, warning: true }))]), batchId]);
 
         await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, errors, duplicateCount);
         broadcastToAll({ type: 'DELIVERY_DATA_MUTATED', verticalId, action: 'bulk_upload', batchId });

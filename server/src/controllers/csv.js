@@ -168,16 +168,16 @@ export const uploadCsv = async (req, res) => {
                 }
             };
 
-            try {
-                const { processCsvJob } = await import('../jobs/csvProcessor.js');
-                await processCsvJob(mockJob);
-            } catch (err) {
-                console.error('❌ Vercel Inline CSV processing failed:', err);
-                await query(
-                    "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
-                    [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
-                );
-            }
+            // Kick off CSV processing in the background (non-blocking for Vercel)
+            import('../jobs/csvProcessor.js')
+                .then(({ processCsvJob }) => processCsvJob(mockJob))
+                .catch(async (err) => {
+                    console.error('❌ Vercel Inline CSV processing failed:', err);
+                    await query(
+                        "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
+                        [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
+                    ).catch(() => {});
+                });
 
             return res.status(202).json({
                 success: true,

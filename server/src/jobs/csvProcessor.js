@@ -89,7 +89,7 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, 
         }
         valuePlaceholders.push(`(${placeholders.join(', ')})`);
         params.push(
-            crypto.randomUUID(),
+            row.id || crypto.randomUUID(),
             verticalId,
             row.subVerticalId || subVerticalId || null,
             row.assignedTo || defaultAssignedTo || null,
@@ -107,7 +107,6 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, 
     const sql = `
         INSERT INTO cost_conversions (${colNames.join(', ')})
         VALUES ${valuePlaceholders.join(', ')}
-        ON CONFLICT DO NOTHING
     `;
     return { sql, params };
 }
@@ -218,13 +217,16 @@ const processCsvJob = async (job) => {
         let existingPhones = [];
         if (uniqueCsvPhones.length > 0) {
             const existingRes = await query(
-                'SELECT phone FROM cost_conversions WHERE vertical_id = $1 AND is_deleted = false AND phone = ANY($2)',
+                `SELECT phone FROM cost_conversions 
+                 WHERE vertical_id = $1 AND is_deleted = false 
+                   AND regexp_replace(phone, '[^\\d+]', '', 'g') = ANY($2)`,
                 [verticalId, uniqueCsvPhones]
             );
             existingPhones = existingRes.rows.map(l => sanitizePhone(l.phone));
         }
         // phoneSet tracks both DB duplicates AND within-CSV duplicates
         const phoneSet = new Set(existingPhones);
+        const rowOutcomes = [];
 
         // ── 7. Second pass: validate + build validLeads array ─────────────────
         let rowNum = 0;
@@ -245,18 +247,24 @@ const processCsvJob = async (job) => {
                 row['business'] || row['business name'] || '';
 
             if (!rawPhone) {
-                errors.push({ row: rowNum, reason: 'Missing contact number', originalRow: rawRow });
+                const reason = 'Missing contact number';
+                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                rowOutcomes.push({ row: rowNum, status: 'failed', reason });
                 continue;
             }
 
             if (!rawName.trim()) {
-                errors.push({ row: rowNum, reason: 'Missing business / person / shop / company name', originalRow: rawRow });
+                const reason = 'Missing business / person / shop / company name';
+                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                rowOutcomes.push({ row: rowNum, status: 'failed', reason });
                 continue;
             }
 
             if (phoneSet.has(rawPhone)) {
                 duplicateCount++;
-                errors.push({ row: rowNum, reason: 'Duplicate: contact number already exists', originalRow: rawRow });
+                const reason = 'Duplicate: contact number already exists';
+                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                rowOutcomes.push({ row: rowNum, status: 'duplicate', reason });
                 continue;
             }
 
@@ -323,6 +331,7 @@ const processCsvJob = async (job) => {
             const rowAssignedTo = assignedTo || agentMap.get(empSpokenName) || null;
 
             validLeads.push({
+                id:           crypto.randomUUID(),
                 name:         rawName,
                 phone:        rawPhone,
                 businessName: rawBusiness,
@@ -343,8 +352,11 @@ const processCsvJob = async (job) => {
                 const { sql, params } = buildBulkInsertSql(
                     chunk, verticalId, subVerticalId, assignedTo, uploadedBy, batchId
                 );
-                const result = await query(sql, params);
-                successCount += result.rowCount;
+                await query(sql, params);
+                successCount += chunk.length;
+                for (const lead of chunk) {
+                    rowOutcomes.push({ row: lead.csvRowNum, status: 'success', id: lead.id });
+                }
             } catch (chunkErr) {
                 console.warn(`[CSV Processor] Bulk insert failed for rows ${i + 1}–${Math.min(i + BATCH_SIZE, validLeads.length)}, falling back to row-by-row.`);
                 for (const lead of chunk) {
@@ -352,11 +364,20 @@ const processCsvJob = async (job) => {
                         const { sql, params } = buildBulkInsertSql(
                             [lead], verticalId, subVerticalId, assignedTo, uploadedBy, batchId
                         );
-                        const result = await query(sql, params);
-                        successCount += result.rowCount;
+                        await query(sql, params);
+                        successCount++;
+                        rowOutcomes.push({ row: lead.csvRowNum, status: 'success', id: lead.id });
                     } catch (singleErr) {
-                        const reason = singleErr.code === '23505' ? 'Duplicate: contact number already exists' : singleErr.message;
-                        errors.push({ row: lead.csvRowNum, reason: reason, originalRow: lead.originalRow });
+                        const isDup = singleErr.code === '23505';
+                        const reason = isDup ? 'Duplicate: contact number already exists' : singleErr.message;
+                        if (isDup) {
+                            duplicateCount++;
+                            errors.push({ row: lead.csvRowNum, reason, originalRow: lead.originalRow });
+                            rowOutcomes.push({ row: lead.csvRowNum, status: 'duplicate', reason });
+                        } else {
+                            errors.push({ row: lead.csvRowNum, reason, originalRow: lead.originalRow });
+                            rowOutcomes.push({ row: lead.csvRowNum, status: 'failed', reason });
+                        }
                     }
                 }
             }
@@ -368,13 +389,23 @@ const processCsvJob = async (job) => {
             await emitProgress(batchId, uploadedBy, verticalId, 'processing', totalRows, successCount, errors, duplicateCount);
         }
 
+        const outcomeSuccess = rowOutcomes.filter(o => o.status === 'success').length;
+        const outcomeDuplicate = rowOutcomes.filter(o => o.status === 'duplicate').length;
+        const outcomeFailed = rowOutcomes.filter(o => o.status === 'failed').length;
+        const outcomeTotal = outcomeSuccess + outcomeDuplicate + outcomeFailed;
+
+        console.log(`[CSV Processor] Batch final report: total=${totalRows}, outcomes=${outcomeTotal} (success=${outcomeSuccess}, duplicates=${outcomeDuplicate}, failed=${outcomeFailed})`);
+        if (outcomeTotal !== totalRows) {
+            console.error(`[CSV Processor] MISMATCH warning: totalRows (${totalRows}) !== outcomeTotal (${outcomeTotal})`);
+        }
+
         // ── 9. Finalize ───────────────────────────────────────────────────────
         await query(`
             UPDATE csv_upload_logs
             SET status = 'done', success_count = $1, failed_count = $2,
                 duplicate_count = $3, errors = $4, processing_finished_at = NOW()
             WHERE id = $5
-        `, [successCount, errors.length, duplicateCount, JSON.stringify(errors), batchId]);
+        `, [successCount, outcomeFailed, duplicateCount, JSON.stringify(errors), batchId]);
 
         await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, errors, duplicateCount);
 
