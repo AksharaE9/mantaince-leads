@@ -32,6 +32,17 @@ export const AppLayout = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [loadingVerticals, setLoadingVerticals] = useState(true);
+  const [buildInfo, setBuildInfo] = useState(null);
+
+  useEffect(() => {
+    axios.get('/health')
+      .then(res => {
+        if (res.data?.success) {
+          setBuildInfo(res.data.data);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Stable snapshot — read inside effects without making them reactive deps
   const snap = useRef({ activeVertical, activeSubVertical, subVerticalsMap: {}, verticals: [] });
@@ -233,6 +244,13 @@ export const AppLayout = () => {
             />
           </div>
         </nav>
+
+        {/* Version Information */}
+        {!sidebarCollapsed && buildInfo && (
+          <div className="px-4 py-2 border-t text-[10px] text-center" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+            v-{buildInfo.commitSha.substring(0, 7)} ({buildInfo.environment})
+          </div>
+        )}
 
         {/* Collapse toggle */}
         <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>

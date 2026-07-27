@@ -52,7 +52,7 @@ router.post('/upload', checkPermission('csv:upload'), upload.single('file'), upl
 // The csv_upload_logs status/log/error-report endpoints are entity-agnostic
 // (they key off batchId, not entity_type) — reused as-is, no duplication.
 router.get('/upload-logs', checkPermission('csv:logs'), getCsvLogs);
-router.get('/upload-logs/:batchId', checkPermission('csv:logs'), getCsvLogById);
-router.get('/upload-logs/:batchId/failed-rows', checkPermission('csv:logs'), streamFailedRows);
+router.get('/upload-logs/:batchId', checkPermission(['csv:logs', 'csv:upload']), getCsvLogById);
+router.get('/upload-logs/:batchId/failed-rows', checkPermission(['csv:logs', 'csv:upload']), streamFailedRows);
 
 export default router;

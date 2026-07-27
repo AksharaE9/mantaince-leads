@@ -177,4 +177,108 @@ describe('Bulk lead-import API (CSV/Excel) — regression coverage', () => {
       expect(res.body.data.fields.some((f) => f.key === 'phone' && f.required)).toBe(true);
     });
   });
+
+  describe('Agent access to CSV upload logs by ID', () => {
+    let agentToken = '';
+    let agentUserId = '';
+    const mockBatchId = '00000000-0000-0000-0000-111122223333';
+    const otherMockBatchId = '00000000-0000-0000-0000-444455556666';
+
+    beforeAll(async () => {
+      // Create agent user with same password as admin ('admin123')
+      const adminRes = await query('SELECT password_hash FROM users WHERE email = $1', ['admin@gmail.com']);
+      const adminHash = adminRes.rows[0].password_hash;
+      
+      agentUserId = '00000000-0000-0000-0000-999988887777';
+      await query(`
+        INSERT INTO users (id, name, email, password_hash, role_id, is_active, is_approved, vertical_access)
+        VALUES ($1, $2, $3, $4, '00000000-0000-0000-0000-000000000003', true, true, $5)
+      `, [agentUserId, 'Test Agent', 'agent-test@gmail.com', adminHash, [verticalId]]);
+
+      // Login as agent
+      const loginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: 'agent-test@gmail.com', password: 'admin123' });
+      agentToken = loginRes.body.data?.accessToken;
+
+      // Insert mock CSV upload log for the agent
+      await query(`
+        INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status)
+        VALUES ($1, $2, $3, 'test.csv', 'test.csv', 'done')
+      `, [mockBatchId, agentUserId, verticalId]);
+
+      // Insert mock CSV upload log for another user (e.g. adminId)
+      const adminMe = await query('SELECT id FROM users WHERE email = $1', ['admin@gmail.com']);
+      const adminId = adminMe.rows[0].id;
+      await query(`
+        INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status)
+        VALUES ($1, $2, $3, 'admin.csv', 'admin.csv', 'done')
+      `, [otherMockBatchId, adminId, verticalId]);
+    });
+
+    afterAll(async () => {
+      await query('DELETE FROM csv_upload_logs WHERE id IN ($1, $2)', [mockBatchId, otherMockBatchId]);
+      if (agentUserId) {
+        await query('DELETE FROM users WHERE id = $1', [agentUserId]);
+      }
+    });
+
+    it('allows an agent user to retrieve their CSV upload log status by ID', async () => {
+      const res = await request(app)
+        .get(`/api/v1/leads/csv/logs/${mockBatchId}`)
+        .set('Authorization', `Bearer ${agentToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.id).toBe(mockBatchId);
+    });
+
+    it('denies an agent user from retrieving another user\'s CSV upload log status by ID', async () => {
+      await request(app)
+        .get(`/api/v1/leads/csv/logs/${otherMockBatchId}`)
+        .set('Authorization', `Bearer ${agentToken}`)
+        .expect(403);
+    });
+
+    it('allows an agent user to download failed rows for their CSV log', async () => {
+      // Mock log with errors to test download
+      await query(`
+        UPDATE csv_upload_logs 
+        SET errors = $1 
+        WHERE id = $2
+      `, [JSON.stringify([{ row: 2, reason: 'invalid phone', originalRow: { name: 'Acme', phone: 'bad' } }]), mockBatchId]);
+
+      const res = await request(app)
+        .get(`/api/v1/leads/csv/logs/${mockBatchId}/failed-rows`)
+        .set('Authorization', `Bearer ${agentToken}`)
+        .expect(200);
+
+      expect(res.headers['content-type']).toContain('text/csv');
+      expect(res.text).toContain('ERROR REASON');
+    });
+
+    it('denies an agent user from downloading failed rows for another user\'s CSV log', async () => {
+      await request(app)
+        .get(`/api/v1/leads/csv/logs/${otherMockBatchId}/failed-rows`)
+        .set('Authorization', `Bearer ${agentToken}`)
+        .expect(403);
+    });
+
+    it('allows an admin user to retrieve any user\'s CSV upload log status by ID', async () => {
+      const res = await request(app)
+        .get(`/api/v1/leads/csv/logs/${mockBatchId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.id).toBe(mockBatchId);
+    });
+
+    it('denies an agent from listing all CSV upload logs', async () => {
+      await request(app)
+        .get('/api/v1/leads/csv/logs')
+        .set('Authorization', `Bearer ${agentToken}`)
+        .expect(403);
+    });
+  });
 });

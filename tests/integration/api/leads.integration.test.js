@@ -47,3 +47,16 @@ describe('CostConversions API Integration', () => {
     });
   });
 });
+
+describe('GET /health diagnostics', () => {
+  it('returns health state, node environment, and Vercel git commit SHA', async () => {
+    const res = await request(app)
+      .get('/health')
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.status).toBe('online');
+    expect(res.body.data).toHaveProperty('commitSha');
+    expect(res.body.data).toHaveProperty('environment');
+  });
+});

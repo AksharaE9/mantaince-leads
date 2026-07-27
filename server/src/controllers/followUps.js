@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { logAudit } from '../services/audit.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { cacheGet, cacheSet, cacheDelete, cacheDeletePattern } from '../services/cache.js';
+import { isValidUUID } from '../utils/validators/index.js';
 
 /**
  * GET /cost-conversions/:costConversionId/follow-ups
@@ -40,7 +41,7 @@ export const getFollowUps = async (req, res) => {
     }
     
     const targetAssigned = assignedTo;
-    if (targetAssigned) {
+    if (targetAssigned && isValidUUID(targetAssigned)) {
       sql += ` AND f.assigned_to_id = $${pIdx++}`;
       params.push(targetAssigned);
     }
@@ -382,7 +383,7 @@ export const getCalendarGrid = async (req, res) => {
     const params = [verticalId, startOfMonth];
     let pIdx = 3;
 
-    if (targetAssigned) {
+    if (targetAssigned && isValidUUID(targetAssigned)) {
       sql += ` AND f.assigned_to_id = $${pIdx++}`;
       params.push(targetAssigned);
     }
@@ -468,7 +469,7 @@ export const getCalendarFollowUpsByDate = async (req, res) => {
     const params = [verticalId, date];
     let pIdx = 3;
 
-    if (targetAssigned) {
+    if (targetAssigned && isValidUUID(targetAssigned)) {
       sql += ` AND f.assigned_to_id = $${pIdx++}`;
       params.push(targetAssigned);
     }

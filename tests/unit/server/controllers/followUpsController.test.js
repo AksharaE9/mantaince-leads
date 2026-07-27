@@ -48,3 +48,49 @@ describe('followUpsController.createFollowUp', () => {
     );
   });
 });
+
+describe('followUpsController.getFollowUps', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('ignores invalid assignedTo query parameter and executes successfully', async () => {
+    vi.mocked(query)
+      .mockResolvedValueOnce({ rows: [{ vertical_id: '00000000-0000-0000-0000-000000000001', assigned_to: 'agent-1' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const req = mockRequest({
+      user: { sub: 'admin-1', role: 'super_admin' },
+      params: { costConversionId: '00000000-0000-0000-0000-000000000002' },
+      query: { assignedTo: 'invalid-uuid-string' }
+    });
+    const res = mockResponse();
+
+    await getFollowUps(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const queryCalls = vi.mocked(query).mock.calls;
+    expect(queryCalls[1][0]).not.toContain('AND f.assigned_to_id =');
+  });
+
+  it('filters by assignedTo when a valid UUID is provided', async () => {
+    const validUuid = '00000000-0000-0000-0000-000000000003';
+    vi.mocked(query)
+      .mockResolvedValueOnce({ rows: [{ vertical_id: '00000000-0000-0000-0000-000000000001', assigned_to: 'agent-1' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const req = mockRequest({
+      user: { sub: 'admin-1', role: 'super_admin' },
+      params: { costConversionId: '00000000-0000-0000-0000-000000000002' },
+      query: { assignedTo: validUuid }
+    });
+    const res = mockResponse();
+
+    await getFollowUps(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const queryCalls = vi.mocked(query).mock.calls;
+    expect(queryCalls[1][0]).toContain('f.assigned_to_id');
+    expect(queryCalls[1][1]).toContain(validUuid);
+  });
+});

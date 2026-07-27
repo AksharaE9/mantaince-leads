@@ -318,6 +318,7 @@ export const uploadRawDataCsv = async (req, res) => {
                     batchId: uploadLog.id,
                     fileBufferBase64: file.buffer.toString('base64'),
                     verticalId,
+                    uploadedBy: req.user.sub,
                     fileExt
                 },
                 progress: async (value) => {

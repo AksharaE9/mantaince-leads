@@ -74,7 +74,14 @@ instance.interceptors.response.use(
     }
 
     // Capture token expired code (from Section 11 specifications)
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401) {
+      if (originalRequest._retry) {
+        // If it was already retried once and still returns 401, redirect to login
+        storeRef.logout();
+        window.location.href = '/login';
+        return Promise.reject(error);
+      }
+
       if (isRefreshing) {
         // Queue original request until token rotates
         return new Promise((resolve, reject) => {

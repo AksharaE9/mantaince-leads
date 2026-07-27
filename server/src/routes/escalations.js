@@ -12,18 +12,15 @@ import checkPermission from '../middleware/checkPermission.js';
 
 const router = express.Router();
 
-router.use(authenticate);
-router.use(attachRole);
-
 // Cost Conversion scoped escalations
-router.post('/cost-conversions/:id/escalations', checkPermission(['leads:update', 'leads:update_own']), createEscalation);
-router.get('/cost-conversions/:id/escalations', checkPermission(['leads:read', 'leads:read_own']), getCostConversionEscalations);
+router.post('/cost-conversions/:id/escalations', authenticate, attachRole, checkPermission(['leads:update', 'leads:update_own']), createEscalation);
+router.get('/cost-conversions/:id/escalations', authenticate, attachRole, checkPermission(['leads:read', 'leads:read_own']), getCostConversionEscalations);
 
 // Admin Inbox
-router.get('/admin/escalations/inbox', checkPermission('reports:read'), getAdminEscalationsInbox);
+router.get('/admin/escalations/inbox', authenticate, attachRole, checkPermission('reports:read'), getAdminEscalationsInbox);
 
 // Escalation Actions
-router.put('/escalations/:id/resolve', checkPermission('reports:read'), resolveEscalation);
-router.put('/escalations/:id/reject', checkPermission('reports:read'), rejectEscalation);
+router.put('/escalations/:id/resolve', authenticate, attachRole, checkPermission('reports:read'), resolveEscalation);
+router.put('/escalations/:id/reject', authenticate, attachRole, checkPermission('reports:read'), rejectEscalation);
 
 export default router;

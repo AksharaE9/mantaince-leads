@@ -221,7 +221,15 @@ app.use('/uploads', express.static(path.join(__dirname, '../../uploads'), {
 
 // Lightweight status checkpoint endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ success: true, data: { status: 'online', time: new Date() } });
+  res.status(200).json({ 
+    success: true, 
+    data: { 
+      status: 'online', 
+      time: new Date(),
+      commitSha: process.env.VERCEL_GIT_COMMIT_SHA || 'local-dev',
+      environment: process.env.NODE_ENV || 'development'
+    } 
+  });
 });
 
 app.get('/', (req, res) => {

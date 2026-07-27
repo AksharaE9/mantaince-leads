@@ -1,12 +1,44 @@
 import jwt from 'jsonwebtoken';
 import { verifyAccessToken } from '../utils/token.js';
 import { query } from '../config/db.js';
+import { JWT_ACCESS_SECRET } from '../config/env.js';
+import { cacheGet, cacheSet } from '../services/cache.js';
 
 /**
  * Authentication Middleware
  * Validates the JWT Access Token in the Authorization header.
  */
 export const authenticate = async (req, res, next) => {
+  // Support connection ticket authentication for SSE
+  if (req.query.ticket) {
+    try {
+      const decoded = jwt.verify(req.query.ticket, JWT_ACCESS_SECRET);
+      if (decoded.type !== 'sse_ticket') {
+        return res.status(401).json({ success: false, error: 'Invalid ticket type' });
+      }
+
+      // Enforce single-use by tracking in a cache pattern (60s TTL)
+      const ticketKey = `sse_used_ticket:${decoded.jti || decoded.sub}:${decoded.iat}`;
+      const alreadyUsed = await cacheGet(ticketKey);
+      if (alreadyUsed) {
+        return res.status(401).json({ success: false, error: 'SSE ticket has already been used' });
+      }
+      await cacheSet(ticketKey, 'true', 60);
+
+      req.user = decoded;
+      
+      const vertRes = await query('SELECT id FROM verticals');
+      req.user.verticalAccess = vertRes.rows.map(v => v.id);
+
+      return next();
+    } catch (error) {
+      return res.status(401).json({
+        success: false,
+        error: 'SSE ticket invalid or expired'
+      });
+    }
+  }
+
   let token = null;
   const authHeader = req.headers.authorization;
 

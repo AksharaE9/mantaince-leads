@@ -62,8 +62,8 @@ router.get('/csv/template/:verticalId', checkPermission('csv:template'), downloa
 router.get('/csv/schema/:verticalId', checkPermission('csv:template'), getImportSchema);
 router.post('/csv/upload', checkPermission('csv:upload'), csvUpload.single('file'), uploadCsv);
 router.get('/csv/logs', checkPermission('csv:logs'), getCsvLogs);
-router.get('/csv/logs/:batchId', checkPermission('csv:logs'), getCsvLogById);
-router.get('/csv/logs/:batchId/failed-rows', checkPermission('csv:logs'), streamFailedRows);
+router.get('/csv/logs/:batchId', checkPermission(['csv:logs', 'csv:upload']), getCsvLogById);
+router.get('/csv/logs/:batchId/failed-rows', checkPermission(['csv:logs', 'csv:upload']), streamFailedRows);
 
 // Standard CostConversions routes
 router.get('/', checkPermission(['leads:read', 'leads:read_own']), getCostConversions);

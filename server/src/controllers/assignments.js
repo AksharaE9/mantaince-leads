@@ -4,6 +4,7 @@ import { broadcast, addClient, removeClient } from '../services/assignmentBroadc
 import { logAudit } from '../services/audit.js';
 import { bulkInsert } from '../db/bulkInsert.js';
 import { cacheDelete } from '../services/cache.js';
+import { signSseTicket } from '../utils/token.js';
 
 /**
  * SSE Stream Endpoint
@@ -47,4 +48,16 @@ export const getMySubVerticals = async (req, res) => {
     success: true, 
     data: [] 
   });
+};
+
+/**
+ * Mint a short-lived SSE connection ticket
+ */
+export const getStreamTicket = async (req, res) => {
+  try {
+    const ticket = signSseTicket(req.user.sub);
+    return res.status(200).json({ success: true, ticket });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
 };

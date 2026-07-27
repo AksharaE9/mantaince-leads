@@ -43,3 +43,14 @@ export const verifyAccessToken = (token) => {
 export const verifyRefreshToken = (token) => {
   return jwt.verify(token, JWT_REFRESH_SECRET);
 };
+
+/**
+ * Sign a short-lived SSE connection ticket
+ */
+export const signSseTicket = (userId) => {
+  return jwt.sign(
+    { sub: String(userId), type: 'sse_ticket', jti: crypto.randomUUID() },
+    JWT_ACCESS_SECRET,
+    { expiresIn: '60s' }
+  );
+};

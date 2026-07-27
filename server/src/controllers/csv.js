@@ -263,6 +263,11 @@ export const getCsvLogById = async (req, res) => {
             if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(cached.vertical_id))) {
                 return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
             }
+            // Strict Log Ownership check: if user lacks csv:logs permission, they must be the uploader
+            const hasLogsPermission = req.user.role === 'super_admin' || (req.role && (req.role.permissions.includes('*') || req.role.permissions.includes('csv:logs')));
+            if (!hasLogsPermission && cached.uploaded_by !== req.user.sub) {
+                return res.status(403).json({ success: false, error: 'Access forbidden: you do not have permission to view other users\' upload logs' });
+            }
             return res.status(200).json({ success: true, data: cached });
         }
 
@@ -273,6 +278,11 @@ export const getCsvLogById = async (req, res) => {
         // Strict Vertical Scoping check
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(log.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+        // Strict Log Ownership check: if user lacks csv:logs permission, they must be the uploader
+        const hasDbLogsPermission = req.user.role === 'super_admin' || (req.role && (req.role.permissions.includes('*') || req.role.permissions.includes('csv:logs')));
+        if (!hasDbLogsPermission && log.uploaded_by !== req.user.sub) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have permission to view other users\' upload logs' });
         }
 
         return res.status(200).json({ success: true, data: log });
@@ -294,6 +304,11 @@ export const streamFailedRows = async (req, res) => {
         // Strict Vertical Scoping check
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(log.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+        // Strict Log Ownership check: if user lacks csv:logs permission, they must be the uploader
+        const hasStreamLogsPermission = req.user.role === 'super_admin' || (req.role && (req.role.permissions.includes('*') || req.role.permissions.includes('csv:logs')));
+        if (!hasStreamLogsPermission && log.uploaded_by !== req.user.sub) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have permission to view other users\' upload logs' });
         }
 
         const errors = log.errors || [];

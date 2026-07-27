@@ -1,18 +1,21 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '../store/authStore.js';
 import { useUiStore } from '../store/uiStore.js';
 import toast from 'react-hot-toast';
+import axios from '../api/axios.js';
 
 export function useRealtimeAssignments() {
   const { user, accessToken } = useAuthStore();
   const { setAssignedSubVerticals, triggerLeadsRefresh } = useUiStore();
+  const esRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const activeRef = useRef(false);
 
   const handleMessage = useCallback((event) => {
     try {
       const payload = JSON.parse(event.data);
 
       if (payload.type === 'ASSIGNMENT_UPDATED') {
-        // If it's our assignment, update the store
         if (payload.userId === user?.id) {
           setAssignedSubVerticals(payload.assignments);
           toast.success('Your workspace assignments have been updated.', { icon: '🔄' });
@@ -33,22 +36,89 @@ export function useRealtimeAssignments() {
     }
   }, [user?.id, setAssignedSubVerticals, triggerLeadsRefresh]);
 
+  const connect = useCallback(async () => {
+    if (!activeRef.current) return;
+    
+    // Clean up existing connection
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+
+    try {
+      // 1. Fetch fresh, short-lived SSE ticket
+      const ticketRes = await axios.post('/api/v1/assignments/stream/ticket');
+      const ticket = ticketRes.data?.ticket;
+      if (!ticket) {
+        throw new Error('No SSE ticket returned');
+      }
+
+      if (!activeRef.current) return;
+
+      // 2. Open EventSource with ticket
+      const apiBase = import.meta.env.VITE_API_URL || '';
+      const streamUrl = `${apiBase}/api/v1/assignments/stream?ticket=${ticket}`;
+      const es = new EventSource(streamUrl, { withCredentials: true });
+      esRef.current = es;
+
+      es.addEventListener('message', handleMessage);
+
+      es.onerror = (err) => {
+        console.warn('[SSE] Connection error/closed, retrying with new ticket...', err);
+        es.close();
+        if (esRef.current === es) {
+          esRef.current = null;
+        }
+        // Attempt reconnect with backoff
+        if (activeRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = setTimeout(connect, 3000);
+        }
+      };
+    } catch (error) {
+      console.error('[SSE] Failed to establish connection:', error);
+      // Attempt reconnect with backoff
+      if (activeRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = setTimeout(connect, 5000);
+      }
+    }
+  }, [handleMessage]);
+
   useEffect(() => {
-    if (!user || !accessToken) return;
+    if (!user || !accessToken) {
+      activeRef.current = false;
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+      clearTimeout(reconnectTimeoutRef.current);
+      return;
+    }
 
-    // Pass token in query string since EventSource doesn't support headers
-    const apiBase = import.meta.env.VITE_API_URL || '';
-    const streamUrl = `${apiBase}/api/v1/assignments/stream?token=${accessToken}`;
-    const es = new EventSource(streamUrl, { withCredentials: true });
+    activeRef.current = true;
+    connect();
 
-    es.addEventListener('message', handleMessage);
-
-    es.onerror = (err) => {
-      console.warn('[SSE] Connection lost, retrying...', err);
+    // Reconnect on online or visibility change (wake up / network restored)
+    const handleVisibilityOrOnlineChange = () => {
+      if (document.visibilityState === 'visible' || navigator.onLine) {
+        console.log('[SSE] Tab visible or browser online; forcing fresh connection...');
+        connect();
+      }
     };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrOnlineChange);
+    window.addEventListener('online', handleVisibilityOrOnlineChange);
 
     return () => {
-      es.close();
+      activeRef.current = false;
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+      clearTimeout(reconnectTimeoutRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityOrOnlineChange);
+      window.removeEventListener('online', handleVisibilityOrOnlineChange);
     };
-  }, [user, accessToken, handleMessage]);
+  }, [user, accessToken, connect]);
 }
