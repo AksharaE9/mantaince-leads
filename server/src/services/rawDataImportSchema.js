@@ -29,7 +29,7 @@ const DISPLAY_ADRESS_AS_TYPO = false;
 
 export const RAW_DATA_FIELDS = [
     { key: 'date', label: 'Date', csvHeader: 'Date', type: 'date', required: true },
-    { key: 'employeeName', label: 'Employee Name', csvHeader: 'Employee Name', type: 'string', required: true, resolvesToUser: true },
+    { key: 'employeeName', label: 'Employee Name', csvHeader: 'Employee Name', type: 'string', required: false, resolvesToUser: true },
     { key: 'businessType', label: 'Business Type', csvHeader: 'Business Type', type: 'string', required: false },
     { key: 'businessName', label: 'Business Name', csvHeader: 'Business Name', type: 'string', required: true, maxLength: 255 },
     { key: 'area', label: 'Area', csvHeader: 'Area', type: 'string', required: false },
@@ -80,7 +80,7 @@ function levenshtein(a, b) {
  */
 export function resolveEmployeeName(name, agents) {
     const clean = (name || '').trim().toLowerCase();
-    if (!clean) return { error: 'Employee Name is required' };
+    if (!clean) return { userId: null };
 
     const exact = agents.filter(a => a.name.trim().toLowerCase() === clean);
     if (exact.length === 1) return { userId: exact[0].id };

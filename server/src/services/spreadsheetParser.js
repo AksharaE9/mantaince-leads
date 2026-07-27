@@ -39,22 +39,21 @@ async function parseXlsxBuffer(buffer) {
         warnings.push(`The file contains ${workbook.worksheets.length} sheets — only the first sheet ("${sheet.name}") was imported.`);
     }
 
-    let headers = null;
+    const headers = [];
+    const headerRow = sheet.getRow(1);
+    const maxCol = headerRow.cellCount || sheet.columnCount;
+    for (let c = 1; c <= maxCol; c++) {
+        headers.push(cellToString(headerRow.getCell(c).value));
+    }
+
     const rows = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-        const rawValues = row.values.slice(1); // exceljs rows are 1-indexed with a leading empty slot
-        if (rowNumber === 1) {
-            // Keep original header casing — normalizeRowKeys() downstream
-            // does the case-insensitive matching. Preserving it here means
-            // error reports (originalRow) show the user's own header text.
-            headers = rawValues.map(v => cellToString(v));
-            return;
-        }
+        if (rowNumber === 1) return;
         const obj = {};
         let hasValue = false;
         headers.forEach((h, i) => {
             if (!h) return;
-            const val = cellToString(rawValues[i]);
+            const val = cellToString(row.getCell(i + 1).value);
             if (val !== '') hasValue = true;
             obj[h] = val;
         });
