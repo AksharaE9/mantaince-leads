@@ -139,7 +139,7 @@ export const processRawDataJob = async (job) => {
             const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
             if (phoneSet.has(phone)) {
                 duplicateCount++;
-                errors.push({ row: rowNum, reason: 'duplicated', originalRow: rawRow });
+                errors.push({ row: rowNum, reason: 'Duplicate: contact number already exists', originalRow: rawRow });
                 return;
             }
             phoneSet.add(phone);
@@ -177,7 +177,8 @@ export const processRawDataJob = async (job) => {
                         await bulkInsert({ query }, 'raw_data', RAW_DATA_COLUMNS, [RAW_DATA_COLUMNS.map(c => r[c])], { onConflict: '' });
                         successCount += 1;
                     } catch (singleErr) {
-                        errors.push({ row: 0, reason: `Insert failed for ${r.business_name}: ${singleErr.message}` });
+                        const isDup = singleErr.code === '23505';
+                        errors.push({ row: 0, reason: `Insert failed for ${r.business_name}: ${isDup ? 'Duplicate: contact number already exists' : singleErr.message}` });
                     }
                 }
             }

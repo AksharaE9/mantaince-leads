@@ -256,7 +256,7 @@ const processCsvJob = async (job) => {
 
             if (phoneSet.has(rawPhone)) {
                 duplicateCount++;
-                errors.push({ row: rowNum, reason: 'duplicated', originalRow: rawRow });
+                errors.push({ row: rowNum, reason: 'Duplicate: contact number already exists', originalRow: rawRow });
                 continue;
             }
 
@@ -355,7 +355,8 @@ const processCsvJob = async (job) => {
                         const result = await query(sql, params);
                         successCount += result.rowCount;
                     } catch (singleErr) {
-                        errors.push({ row: lead.csvRowNum, reason: singleErr.message, originalRow: lead.originalRow });
+                        const reason = singleErr.code === '23505' ? 'Duplicate: contact number already exists' : singleErr.message;
+                        errors.push({ row: lead.csvRowNum, reason: reason, originalRow: lead.originalRow });
                     }
                 }
             }

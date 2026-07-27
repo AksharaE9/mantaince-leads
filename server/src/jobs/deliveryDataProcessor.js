@@ -172,7 +172,7 @@ export const processDeliveryDataJob = async (job) => {
             const dupKey = deliveryDupKey(phone, row.deliveryDate, row.deliveryTime);
             if (dupKeySet.has(dupKey)) {
                 duplicateCount++;
-                errors.push({ row: rowNum, reason: 'duplicated (same phone, delivery date, and delivery time already recorded)', originalRow: rawRow });
+                errors.push({ row: rowNum, reason: 'Duplicate: same phone number, delivery date, and delivery time already exists', originalRow: rawRow });
                 return;
             }
             dupKeySet.add(dupKey);
@@ -216,7 +216,8 @@ export const processDeliveryDataJob = async (job) => {
                         await bulkInsert({ query }, 'delivery_data', DELIVERY_DATA_COLUMNS, [DELIVERY_DATA_COLUMNS.map(c => r[c])], { onConflict: '' });
                         successCount += 1;
                     } catch (singleErr) {
-                        errors.push({ row: 0, reason: `Insert failed for ${r.business_name}: ${singleErr.message}` });
+                        const isDup = singleErr.code === '23505';
+                        errors.push({ row: 0, reason: `Insert failed for ${r.business_name}: ${isDup ? 'Duplicate: same phone number, delivery date, and delivery time already exists' : singleErr.message}` });
                     }
                 }
             }
