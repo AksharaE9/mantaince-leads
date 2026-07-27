@@ -23,7 +23,6 @@ import {
   X,
   Calendar,
   ExternalLink,
-  Database,
 } from 'lucide-react';
 import axios from '../api/axios.js';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
@@ -36,7 +35,6 @@ import GeotagCapture from '../components/GeotagCapture.jsx';
 import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
 import SearchableOperatorSelect from '../components/SearchableOperatorSelect.jsx';
 import CsvImportModal from '../components/CsvImportModal.jsx';
-import RawDataModal from '../components/RawDataModal.jsx';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
@@ -224,8 +222,6 @@ export const LeadsPage = () => {
   // CSV/Excel Import Modal (see components/CsvImportModal.jsx)
   const [csvImportModalOpen, setCsvImportModalOpen] = useState(false);
   const [leadFormSubVerticalId, setLeadFormSubVerticalId] = useState('');
-  // Raw Data feature (see components/RawDataModal.jsx)
-  const [rawDataModalOpen, setRawDataModalOpen] = useState(false);
 
   const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
 
@@ -865,6 +861,20 @@ export const LeadsPage = () => {
           </button>
           <button
             type="button"
+            onClick={() => navigate('/raw-data')}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+          >
+            <span>Raw Data →</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/delivery-data')}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+          >
+            <span>Delivery Data →</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setShowFilters((prev) => !prev)}
             className="inline-flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg hover:bg-stone-50 text-sm text-[--text-secondary] bg-white font-medium shadow-sm"
           >
@@ -891,14 +901,6 @@ export const LeadsPage = () => {
           >
             <Upload size={16} />
             <span>Import CSV</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setRawDataModalOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg hover:bg-stone-50 text-sm text-[--text-secondary] bg-white font-medium shadow-sm"
-          >
-            <Database size={16} />
-            <span>Raw Data</span>
           </button>
           <button
             type="button"
@@ -1089,15 +1091,6 @@ export const LeadsPage = () => {
         filenamePrefix="leads"
         title="Import Leads"
         onImportComplete={fetchLeads}
-      />
-
-      {/* Raw Data feature — Single Add + Bulk Upload, see components/RawDataModal.jsx */}
-      <RawDataModal
-        open={rawDataModalOpen}
-        onClose={() => setRawDataModalOpen(false)}
-        vertical={activeVertical}
-        agents={agents}
-        onSaved={fetchLeads}
       />
 
       {leadModalOpen && (

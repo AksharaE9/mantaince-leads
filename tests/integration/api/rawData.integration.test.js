@@ -106,6 +106,95 @@ describe('Raw Data API', () => {
         });
     });
 
+    describe('GET /api/v1/raw-data — filters, sort, totalPages, and CSV export (section-page promotion)', () => {
+        // Own isolated fixture rows (unique "Filter Test" name prefix + unique
+        // businessType markers) so assertions never depend on how many rows
+        // other describe blocks in this file happen to have created first.
+        beforeAll(async () => {
+            const rows = [
+                { date: '2026-07-01', businessName: 'Filter Test Alpha', businessType: 'FilterTestRetail', city: 'Chennai', phoneNumber: '9876504001' },
+                { date: '2026-07-10', businessName: 'Filter Test Beta', businessType: 'FilterTestWholesale', city: 'Mumbai', phoneNumber: '9876504002' },
+                { date: '2026-07-20', businessName: 'Filter Test Gamma', businessType: 'FilterTestRetail', city: 'Chennai', phoneNumber: '9876504003' },
+            ];
+            for (const row of rows) {
+                await request(app)
+                    .post('/api/v1/raw-data')
+                    .set('Authorization', `Bearer ${adminToken}`)
+                    .send({ verticalId, employeeName: 'Super Admin', ...row })
+                    .expect(201);
+            }
+        });
+
+        it('filters by businessType', async () => {
+            const res = await request(app)
+                .get(`/api/v1/raw-data?verticalId=${verticalId}&search=${encodeURIComponent('Filter Test')}&businessType=FilterTestRetail`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            const names = res.body.data.map(r => r.business_name).sort();
+            expect(names).toEqual(['Filter Test Alpha', 'Filter Test Gamma']);
+        });
+
+        it('filters by city', async () => {
+            const res = await request(app)
+                .get(`/api/v1/raw-data?verticalId=${verticalId}&search=${encodeURIComponent('Filter Test')}&city=Mumbai`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            expect(res.body.data.map(r => r.business_name)).toEqual(['Filter Test Beta']);
+        });
+
+        it('filters by dateFrom/dateTo (on the visit Date column, not created_at)', async () => {
+            const res = await request(app)
+                .get(`/api/v1/raw-data?verticalId=${verticalId}&search=${encodeURIComponent('Filter Test')}&dateFrom=2026-07-05&dateTo=2026-07-15`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            expect(res.body.data.map(r => r.business_name)).toEqual(['Filter Test Beta']);
+        });
+
+        it('filters by assignedUserId', async () => {
+            const res = await request(app)
+                .get(`/api/v1/raw-data?verticalId=${verticalId}&search=${encodeURIComponent('Filter Test')}&assignedUserId=${agentId}`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            expect(res.body.data).toHaveLength(3);
+        });
+
+        it('sorts by date ascending and descending', async () => {
+            const asc = await request(app)
+                .get(`/api/v1/raw-data?verticalId=${verticalId}&search=${encodeURIComponent('Filter Test')}&sortBy=date&sortDir=asc`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            expect(asc.body.data[0].business_name).toBe('Filter Test Alpha');
+            expect(asc.body.data[asc.body.data.length - 1].business_name).toBe('Filter Test Gamma');
+
+            const desc = await request(app)
+                .get(`/api/v1/raw-data?verticalId=${verticalId}&search=${encodeURIComponent('Filter Test')}&sortBy=date&sortDir=desc`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            expect(desc.body.data[0].business_name).toBe('Filter Test Gamma');
+        });
+
+        it('computes meta.totalPages from total/limit', async () => {
+            const res = await request(app)
+                .get(`/api/v1/raw-data?verticalId=${verticalId}&search=${encodeURIComponent('Filter Test')}&limit=2`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            expect(res.body.meta.total).toBe(3);
+            expect(res.body.meta.totalPages).toBe(2);
+        });
+
+        it('exports a CSV respecting the same filters as the list endpoint', async () => {
+            const res = await request(app)
+                .get(`/api/v1/raw-data/export/csv?verticalId=${verticalId}&search=${encodeURIComponent('Filter Test')}&businessType=FilterTestRetail`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+            expect(res.headers['content-type']).toContain('text/csv');
+            expect(res.text).toContain('Filter Test Alpha');
+            expect(res.text).toContain('Filter Test Gamma');
+            expect(res.text).not.toContain('Filter Test Beta');
+            expect(res.text.split('\n')[0]).toContain('Business Name');
+        });
+    });
+
     describe('POST /api/v1/raw-data — Single Add (shares validateRawDataRow with bulk upload)', () => {
         it('creates a record when the employee name resolves and all required fields are present', async () => {
             const res = await request(app)

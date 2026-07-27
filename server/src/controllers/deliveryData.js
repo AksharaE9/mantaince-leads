@@ -7,24 +7,25 @@ import { isValidUUID } from '../utils/validators/index.js';
 import { sendControllerError } from '../utils/dbErrors.js';
 import { logAudit } from '../services/audit.js';
 import {
-    RAW_DATA_FIELDS,
-    validateRawDataRow,
+    DELIVERY_DATA_FIELDS,
+    validateDeliveryDataRow,
     getAssignableAgents,
     getKnownBusinessTypes,
-    buildRawDataFilters,
-    resolveRawDataSortColumn,
-} from '../services/rawDataImportSchema.js';
+    findLinkedRawData,
+    buildDeliveryDataFilters,
+    resolveDeliveryDataSortColumn,
+} from '../services/deliveryDataImportSchema.js';
 import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * GET /raw-data
- * Same empty/omitted-query-param safety as getCostConversions — none of
- * these ever reach a WHERE clause unless present and well-formed.
+ * GET /delivery-data
+ * Same empty/omitted-query-param safety as getRawData — none of these ever
+ * reach a WHERE clause unless present and well-formed.
  */
-export const getRawData = async (req, res) => {
+export const getDeliveryData = async (req, res) => {
     const { verticalId, page = 1, limit = 25, sortBy, sortDir } = req.query;
     try {
         if (!verticalId || !isValidUUID(verticalId)) {
@@ -35,8 +36,8 @@ export const getRawData = async (req, res) => {
         }
 
         const params = [verticalId];
-        const wheres = ['r.vertical_id = $1', 'r.is_deleted = false'];
-        const filters = buildRawDataFilters(req.query, 2);
+        const wheres = ['d.vertical_id = $1', 'd.is_deleted = false'];
+        const filters = buildDeliveryDataFilters(req.query, 2);
         wheres.push(...filters.clauses);
         params.push(...filters.params);
         const pIdx = filters.nextIdx;
@@ -44,20 +45,20 @@ export const getRawData = async (req, res) => {
         const limitNum = Math.min(parseInt(limit, 10) || 25, 100);
         const pageNum = Math.max(parseInt(page, 10) || 1, 1);
         const offset = (pageNum - 1) * limitNum;
-        const sortCol = resolveRawDataSortColumn(sortBy);
+        const sortCol = resolveDeliveryDataSortColumn(sortBy);
         const sortDirection = sortDir === 'asc' ? 'ASC' : 'DESC';
 
         const sql = `
-            SELECT r.*, u.name AS assignee_name
-            FROM raw_data r
-            LEFT JOIN users u ON u.id = r.assigned_user_id
+            SELECT d.*, u.name AS assignee_name
+            FROM delivery_data d
+            LEFT JOIN users u ON u.id = d.assigned_user_id
             WHERE ${wheres.join(' AND ')}
             ORDER BY ${sortCol} ${sortDirection}
             LIMIT $${pIdx} OFFSET $${pIdx + 1}
         `;
         params.push(limitNum, offset);
 
-        const countSql = `SELECT COUNT(*) FROM raw_data r WHERE ${wheres.join(' AND ')}`;
+        const countSql = `SELECT COUNT(*) FROM delivery_data d WHERE ${wheres.join(' AND ')}`;
 
         const [rowsRes, countRes] = await Promise.all([
             query(sql, params),
@@ -71,20 +72,18 @@ export const getRawData = async (req, res) => {
             meta: { total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum) || 1 },
         });
     } catch (error) {
-        return sendControllerError(res, error, 'getRawData');
+        return sendControllerError(res, error, 'getDeliveryData');
     }
 };
 
 /**
- * GET /raw-data/export/csv — exports the same rows the list endpoint would
- * return for the given filters (minus pagination), using the exact same
- * `buildRawDataFilters` builder so export and list can never disagree about
- * what a filter matches. Simple string-build, not a DB-cursor stream —
- * proportionate to this entity's expected row counts (see leadImportTemplate
- * / costConversions.js's streaming export, which is sized for a much larger
- * dataset than Raw Data currently has).
+ * GET /delivery-data/export/csv — mirrors exportRawDataCsv (see
+ * controllers/rawData.js) exactly: same non-streaming approach, same
+ * buildDeliveryDataFilters()-shared-with-the-list-endpoint pattern. Includes
+ * Delivery Date/Delivery Time; never includes linkedRawDataId (it's not a
+ * template/schema field — see deliveryDataImportSchema.js).
  */
-const RAW_DATA_EXPORT_MAPPERS = {
+const DELIVERY_DATA_EXPORT_MAPPERS = {
     date: r => r.date_str,
     employeeName: r => r.assignee_name,
     businessType: r => r.business_type,
@@ -96,9 +95,11 @@ const RAW_DATA_EXPORT_MAPPERS = {
     appointmentDate: r => r.appointment_date_str,
     appointmentTimings: r => r.appointment_timings,
     remarks: r => r.remarks,
+    deliveryDate: r => r.delivery_date_str,
+    deliveryTime: r => r.delivery_time,
 };
 
-export const exportRawDataCsv = async (req, res) => {
+export const exportDeliveryDataCsv = async (req, res) => {
     const { verticalId, sortBy, sortDir } = req.query;
     try {
         if (!verticalId || !isValidUUID(verticalId)) {
@@ -109,49 +110,50 @@ export const exportRawDataCsv = async (req, res) => {
         }
 
         const params = [verticalId];
-        const wheres = ['r.vertical_id = $1', 'r.is_deleted = false'];
-        const filters = buildRawDataFilters(req.query, 2);
+        const wheres = ['d.vertical_id = $1', 'd.is_deleted = false'];
+        const filters = buildDeliveryDataFilters(req.query, 2);
         wheres.push(...filters.clauses);
         params.push(...filters.params);
 
-        const sortCol = resolveRawDataSortColumn(sortBy);
+        const sortCol = resolveDeliveryDataSortColumn(sortBy);
         const sortDirection = sortDir === 'asc' ? 'ASC' : 'DESC';
 
-        // to_char formats dates server-side in SQL — avoids re-interpreting a
-        // pg DATE-typed Date object through a JS timezone (see CLAUDE.md's
-        // documented exceljs date gotcha; same class of bug, avoided the
-        // same way here).
         const rowsRes = await query(`
-            SELECT r.*, u.name AS assignee_name,
-                to_char(r.date, 'YYYY-MM-DD') AS date_str,
-                to_char(r.appointment_date, 'YYYY-MM-DD') AS appointment_date_str
-            FROM raw_data r
-            LEFT JOIN users u ON u.id = r.assigned_user_id
+            SELECT d.*, u.name AS assignee_name,
+                to_char(d.date, 'YYYY-MM-DD') AS date_str,
+                to_char(d.appointment_date, 'YYYY-MM-DD') AS appointment_date_str,
+                to_char(d.delivery_date, 'YYYY-MM-DD') AS delivery_date_str
+            FROM delivery_data d
+            LEFT JOIN users u ON u.id = d.assigned_user_id
             WHERE ${wheres.join(' AND ')}
             ORDER BY ${sortCol} ${sortDirection}
         `, params);
 
         const csvLine = (vals) => vals.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
-        const headers = RAW_DATA_FIELDS.map(f => f.label);
+        const headers = DELIVERY_DATA_FIELDS.map(f => f.label);
         const lines = [csvLine(headers)];
         for (const row of rowsRes.rows) {
-            lines.push(csvLine(RAW_DATA_FIELDS.map(f => RAW_DATA_EXPORT_MAPPERS[f.key](row))));
+            lines.push(csvLine(DELIVERY_DATA_FIELDS.map(f => DELIVERY_DATA_EXPORT_MAPPERS[f.key](row))));
         }
 
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename=raw-data-export-${Date.now()}.csv`);
+        res.setHeader('Content-Disposition', `attachment; filename=delivery-data-export-${Date.now()}.csv`);
         return res.status(200).send(lines.join('\n') + '\n');
     } catch (error) {
-        return sendControllerError(res, error, 'exportRawDataCsv');
+        return sendControllerError(res, error, 'exportDeliveryDataCsv');
     }
 };
 
 /**
- * POST /raw-data
- * Single-Add — runs through the exact same validateRawDataRow() the bulk
- * upload path uses, so the two can never disagree about what's valid.
+ * POST /delivery-data
+ * Single-Add — runs through the exact same validateDeliveryDataRow() the
+ * bulk upload path uses, so the two can never disagree about what's valid.
+ *
+ * Unlike Raw Data, there is no phone-uniqueness reject here: Delivery Data
+ * models a delivery event log, so multiple rows sharing a phone number/
+ * business name are expected (repeat deliveries to the same business).
  */
-export const createRawData = async (req, res) => {
+export const createDeliveryData = async (req, res) => {
     const { verticalId } = req.body;
     try {
         if (!verticalId || !isValidUUID(verticalId)) {
@@ -178,52 +180,50 @@ export const createRawData = async (req, res) => {
             appointmentDate: req.body.appointmentDate,
             appointmentTimings: req.body.appointmentTimings,
             remarks: req.body.remarks,
+            deliveryDate: req.body.deliveryDate,
+            deliveryTime: req.body.deliveryTime,
         };
 
-        const { errors, warnings, assignedUserId } = validateRawDataRow(row, { agents, knownBusinessTypes });
+        const { errors, warnings, assignedUserId } = validateDeliveryDataRow(row, { agents, knownBusinessTypes });
         if (errors.length > 0) {
             return res.status(422).json({ success: false, error: 'Validation failed', errors });
         }
 
         const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
-        const dupRes = await query(
-            'SELECT id FROM raw_data WHERE vertical_id = $1 AND phone_number = $2 AND is_deleted = false LIMIT 1',
-            [verticalId, phone]
-        );
-        if (dupRes.rows.length > 0) {
-            return res.status(409).json({ success: false, error: 'A raw data record with this phone number already exists' });
-        }
+        const linkResult = await findLinkedRawData(verticalId, phone, row.businessName);
+        if (linkResult.warning) warnings.push({ field: 'linkedRawDataId', message: linkResult.warning });
 
         const id = crypto.randomUUID();
         const insertRes = await query(`
-            INSERT INTO raw_data (
+            INSERT INTO delivery_data (
                 id, vertical_id, assigned_user_id, date, business_type, business_name,
                 area, city, phone_number, address, appointment_date, appointment_timings,
-                remarks, source, created_by
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'single_add',$14)
+                remarks, delivery_date, delivery_time, linked_raw_data_id, source, created_by
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'single_add',$17)
             RETURNING *
         `, [
             id, verticalId, assignedUserId,
             row.date || null, row.businessType || null, row.businessName,
             row.area || null, row.city || null, phone, row.address || null,
             row.appointmentDate || null, row.appointmentTimings || null,
-            row.remarks || null, req.user.sub,
+            row.remarks || null, row.deliveryDate, row.deliveryTime,
+            linkResult.linkedRawDataId, req.user.sub,
         ]);
 
-        logAudit(req, { action: 'raw_data.create', targetCollection: 'raw_data', targetId: id, after: insertRes.rows[0] });
+        logAudit(req, { action: 'delivery_data.create', targetCollection: 'delivery_data', targetId: id, after: insertRes.rows[0] });
 
         return res.status(201).json({ success: true, data: insertRes.rows[0], warnings });
     } catch (error) {
-        return sendControllerError(res, error, 'createRawData');
+        return sendControllerError(res, error, 'createDeliveryData');
     }
 };
 
 /**
- * GET /raw-data/import-template — dynamic CSV/XLSX template, same schema
- * the bulk validator enforces. Vertical is only used to resolve the live
- * Employee Name dropdown list — it is never a column in the template.
+ * GET /delivery-data/import-template — dynamic CSV/XLSX template, same
+ * schema the bulk validator enforces. Vertical is only used to resolve the
+ * live Employee Name dropdown list — it is never a column in the template.
  */
-export const downloadRawDataTemplate = async (req, res) => {
+export const downloadDeliveryDataTemplate = async (req, res) => {
     const { verticalId } = req.query;
     try {
         if (!verticalId || !isValidUUID(verticalId)) {
@@ -238,49 +238,50 @@ export const downloadRawDataTemplate = async (req, res) => {
             businessName: 'Acme Traders', area: 'Whitefield', city: 'Bengaluru',
             phoneNumber: '9876543210', address: '123 Main Street',
             appointmentDate: '2026-08-01', appointmentTimings: '11:00 AM', remarks: 'Interested',
+            deliveryDate: '2026-08-05', deliveryTime: '2:00 PM - 3:00 PM',
         };
 
         if (req.query.format === 'xlsx') {
             const agents = await getAssignableAgents(verticalId);
-            const workbook = await buildXlsxTemplate(RAW_DATA_FIELDS, agents.map(a => a.name), sampleValues);
+            const workbook = await buildXlsxTemplate(DELIVERY_DATA_FIELDS, agents.map(a => a.name), sampleValues);
             const buffer = await workbook.xlsx.writeBuffer();
             res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            res.setHeader('Content-Disposition', 'attachment; filename=raw-data-template.xlsx');
+            res.setHeader('Content-Disposition', 'attachment; filename=delivery-data-template.xlsx');
             return res.status(200).send(Buffer.from(buffer));
         }
 
-        const headers = RAW_DATA_FIELDS.map(f => f.csvHeader);
-        const sampleRow = RAW_DATA_FIELDS.map(f => sampleValues[f.key] ?? '');
+        const headers = DELIVERY_DATA_FIELDS.map(f => f.csvHeader);
+        const sampleRow = DELIVERY_DATA_FIELDS.map(f => sampleValues[f.key] ?? '');
         const csvLine = (vals) => vals.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
         const csvContent = csvLine(headers) + '\n' + csvLine(sampleRow) + '\n';
 
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', 'attachment; filename=raw-data-template.csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=delivery-data-template.csv');
         return res.status(200).send(csvContent);
     } catch (error) {
-        return sendControllerError(res, error, 'downloadRawDataTemplate');
+        return sendControllerError(res, error, 'downloadDeliveryDataTemplate');
     }
 };
 
 /**
- * GET /raw-data/schema — same schema JSON both the template and the
+ * GET /delivery-data/schema — same schema JSON both the template and the
  * validator use, exposed so the frontend can pre-validate identically.
  */
-export const getRawDataSchema = async (req, res) => {
+export const getDeliveryDataSchema = async (req, res) => {
     try {
-        return res.status(200).json({ success: true, data: { fields: RAW_DATA_FIELDS } });
+        return res.status(200).json({ success: true, data: { fields: DELIVERY_DATA_FIELDS } });
     } catch (error) {
-        return sendControllerError(res, error, 'getRawDataSchema');
+        return sendControllerError(res, error, 'getDeliveryDataSchema');
     }
 };
 
 /**
- * POST /raw-data/upload
- * Queues the file the same way uploadCsv (csv.js) does for Leads — same
- * csv_upload_logs table, discriminated by entity_type='raw_data' so the
- * shared worker loop and log/status/error-report endpoints all just work.
+ * POST /delivery-data/upload
+ * Queues the file the same way uploadRawDataCsv does — same csv_upload_logs
+ * table, discriminated by entity_type='delivery_data' so the shared worker
+ * loop and log/status/error-report endpoints all just work.
  */
-export const uploadRawDataCsv = async (req, res) => {
+export const uploadDeliveryDataCsv = async (req, res) => {
     const { verticalId } = req.body;
     const file = req.file;
     try {
@@ -300,14 +301,14 @@ export const uploadRawDataCsv = async (req, res) => {
             // Vercel Serverless environment: bypass disk writes and run processing inline
             const logRes = await query(`
                 INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type)
-                VALUES ($1, $2, $3, $4, $5, 'processing', 'raw_data')
+                VALUES ($1, $2, $3, $4, $5, 'processing', 'delivery_data')
                 RETURNING *
             `, [logId, req.user.sub, verticalId, fileName, file.originalname]);
 
             const uploadLog = logRes.rows[0];
 
             await logAudit(req, {
-                action: 'raw_data.upload_processing_vercel',
+                action: 'delivery_data.upload_processing_vercel',
                 targetCollection: 'csv_upload_logs',
                 targetId: uploadLog.id,
                 after: { originalFileName: file.originalname, status: 'processing' },
@@ -326,10 +327,10 @@ export const uploadRawDataCsv = async (req, res) => {
             };
 
             try {
-                const { processRawDataJob } = await import('../jobs/rawDataProcessor.js');
-                await processRawDataJob(mockJob);
+                const { processDeliveryDataJob } = await import('../jobs/deliveryDataProcessor.js');
+                await processDeliveryDataJob(mockJob);
             } catch (err) {
-                console.error('❌ Vercel Inline RawData processing failed:', err);
+                console.error('❌ Vercel Inline DeliveryData processing failed:', err);
                 await query(
                     "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
                     [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
@@ -349,13 +350,13 @@ export const uploadRawDataCsv = async (req, res) => {
 
         const logRes = await query(`
             INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type)
-            VALUES ($1, $2, $3, $4, $5, 'queued', 'raw_data')
+            VALUES ($1, $2, $3, $4, $5, 'queued', 'delivery_data')
             RETURNING *
         `, [logId, req.user.sub, verticalId, fileName, file.originalname]);
 
         const uploadLog = logRes.rows[0];
         await logAudit(req, {
-            action: 'raw_data.upload_queued',
+            action: 'delivery_data.upload_queued',
             targetCollection: 'csv_upload_logs',
             targetId: uploadLog.id,
             after: { originalFileName: file.originalname, status: 'queued' },
@@ -366,6 +367,6 @@ export const uploadRawDataCsv = async (req, res) => {
             data: { batchId: uploadLog.id, status: 'queued', message: 'File uploaded and queued for processing.' },
         });
     } catch (error) {
-        return sendControllerError(res, error, 'uploadRawDataCsv');
+        return sendControllerError(res, error, 'uploadDeliveryDataCsv');
     }
 };

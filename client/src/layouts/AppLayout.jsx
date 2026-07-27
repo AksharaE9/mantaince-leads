@@ -1,9 +1,10 @@
 /* eslint-disable i18next/no-literal-string */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { 
-  Layers, Users, Settings, LogOut, ChevronDown, 
-  Menu, X, Bell, BarChart3, ChevronRight, FileSpreadsheet, Calendar, ClipboardList, TrendingUp, Terminal
+import {
+  Layers, Users, Settings, LogOut, ChevronDown,
+  Menu, X, Bell, BarChart3, ChevronRight, FileSpreadsheet, Calendar, ClipboardList, TrendingUp, Terminal,
+  Database, Truck,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore.js';
 import { useUiStore } from '../store/uiStore.js';
@@ -191,6 +192,8 @@ export const AppLayout = () => {
         <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5">
           {navLink('/follow-ups-positives', Calendar, 'Follow-ups/Positives', true)}
           {navLink('/leads', Layers, 'COS', false)}
+          {navLink('/raw-data', Database, 'Raw Data', true)}
+          {navLink('/delivery-data', Truck, 'Delivery Data', true)}
           {navLink('/calendar', Calendar, 'Calendar', true)}
           {navLink('/follow-ups', ClipboardList, 'Follow-ups', true)}
           {isAdmin && navLink('/reports', BarChart3, 'Reports', true)}
@@ -256,6 +259,8 @@ export const AppLayout = () => {
               {[
                 ['/follow-ups-positives', Calendar, 'Follow-ups/Positives'],
                 ['/leads', Layers, 'COS'],
+                ['/raw-data', Database, 'Raw Data'],
+                ['/delivery-data', Truck, 'Delivery Data'],
                 ['/calendar', Calendar, 'Calendar'],
                 ['/follow-ups', ClipboardList, 'Follow-ups'],
                 isAdmin ? ['/reports', BarChart3, 'Reports'] : null,

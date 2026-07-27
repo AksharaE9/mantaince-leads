@@ -23,6 +23,8 @@ const AdminSubVerticalFieldsPage = lazy(() => import('./pages/AdminSubVerticalFi
 const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const FollowUpsPage = lazy(() => import('./pages/FollowUpsPage.jsx'));
 const FollowUpsPositivesPage = lazy(() => import('./pages/FollowUpsPositivesPage.jsx'));
+const RawDataPage = lazy(() => import('./pages/RawDataPage.jsx'));
+const DeliveryDataPage = lazy(() => import('./pages/DeliveryDataPage.jsx'));
 const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage.jsx'));
 const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage.jsx'));
 
@@ -131,6 +133,8 @@ export const App = () => {
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="follow-ups" element={<FollowUpsPage />} />
               <Route path="follow-ups-positives" element={<FollowUpsPositivesPage />} />
+              <Route path="raw-data" element={<RawDataPage />} />
+              <Route path="delivery-data" element={<DeliveryDataPage />} />
 
               {/* Admin Scoped views */}
               <Route path="admin/dashboard" element={

@@ -1,13 +1,13 @@
 import express from 'express';
 import multer from 'multer';
 import {
-  getRawData,
-  createRawData,
-  downloadRawDataTemplate,
-  getRawDataSchema,
-  uploadRawDataCsv,
-  exportRawDataCsv,
-} from '../controllers/rawData.js';
+  getDeliveryData,
+  createDeliveryData,
+  downloadDeliveryDataTemplate,
+  getDeliveryDataSchema,
+  uploadDeliveryDataCsv,
+  exportDeliveryDataCsv,
+} from '../controllers/deliveryData.js';
 import { getCsvLogs, getCsvLogById, streamFailedRows } from '../controllers/csv.js';
 import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
@@ -15,7 +15,7 @@ import checkPermission from '../middleware/checkPermission.js';
 
 const router = express.Router();
 
-// Same allow-list as the Leads import (see routes/costConversions.js) —
+// Same allow-list as the Leads/Raw Data import (see routes/rawData.js) —
 // extension is the trusted signal, MIME is only used to reject obvious
 // mismatches, since browsers report inconsistent MIME types for .csv.
 const IMPORT_FILE_EXTENSIONS = new Set(['.csv', '.xlsx', '.xls']);
@@ -38,16 +38,16 @@ const upload = multer({
 router.use(authenticate);
 router.use(attachRole);
 
-// Same permission keys as Add Lead / Import CSV — see investigation notes:
-// raw_data is gated identically to Leads rather than a new permission key,
-// so no existing role needs a manual grant to use it.
-router.get('/', checkPermission(['leads:read', 'leads:read_own']), getRawData);
-router.post('/', checkPermission('leads:create'), createRawData);
-router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exportRawDataCsv);
+// Same permission keys as Raw Data — Delivery Data is gated identically to
+// Leads/Raw Data rather than a new permission key, so no existing role
+// needs a manual grant to use it (see RBAC note in CLAUDE.md).
+router.get('/', checkPermission(['leads:read', 'leads:read_own']), getDeliveryData);
+router.post('/', checkPermission('leads:create'), createDeliveryData);
+router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exportDeliveryDataCsv);
 
-router.get('/import-template', checkPermission('csv:template'), downloadRawDataTemplate);
-router.get('/schema', checkPermission('csv:template'), getRawDataSchema);
-router.post('/upload', checkPermission('csv:upload'), upload.single('file'), uploadRawDataCsv);
+router.get('/import-template', checkPermission('csv:template'), downloadDeliveryDataTemplate);
+router.get('/schema', checkPermission('csv:template'), getDeliveryDataSchema);
+router.post('/upload', checkPermission('csv:upload'), upload.single('file'), uploadDeliveryDataCsv);
 
 // The csv_upload_logs status/log/error-report endpoints are entity-agnostic
 // (they key off batchId, not entity_type) — reused as-is, no duplication.

@@ -1,4 +1,5 @@
 import { query } from '../config/db.js';
+import { isValidUUID } from '../utils/validators/index.js';
 
 /**
  * Shared schema for the "Raw Data" import feature — single source of truth
@@ -108,7 +109,7 @@ export function resolveEmployeeName(name, agents) {
 
 const PHONE_REGEX = /^\+?\d{7,15}$/;
 
-function parseFlexibleDate(value) {
+export function parseFlexibleDate(value) {
     if (!value) return null;
     const str = String(value).trim();
     // ISO / yyyy-mm-dd first (unambiguous)
@@ -186,6 +187,62 @@ export function validateRawDataRow(row, { agents, knownBusinessTypes }) {
     }
 
     return { errors, warnings, assignedUserId };
+}
+
+// ── List/export filter & sort helpers ──────────────────────────────────────
+// Shared by the GET /raw-data list endpoint and the GET /raw-data/export/csv
+// endpoint (server/src/controllers/rawData.js), so a query string can never
+// be filtered differently by the two — one builder, two callers.
+
+const RAW_DATA_SORT_COLUMNS = {
+    date: 'r.date',
+    businessName: 'r.business_name',
+    city: 'r.city',
+    createdAt: 'r.created_at',
+};
+
+export function resolveRawDataSortColumn(sortBy) {
+    return RAW_DATA_SORT_COLUMNS[sortBy] || RAW_DATA_SORT_COLUMNS.createdAt;
+}
+
+/**
+ * Builds additional WHERE clauses/params for raw_data queries, on top of the
+ * mandatory vertical_id/is_deleted clauses the caller already owns.
+ * `startIdx` is the next free $N placeholder index.
+ */
+export function buildRawDataFilters(queryParams, startIdx) {
+    const { assignedUserId, search, dateFrom, dateTo, businessType, city } = queryParams;
+    const clauses = [];
+    const params = [];
+    let idx = startIdx;
+
+    if (assignedUserId && isValidUUID(assignedUserId)) {
+        clauses.push(`r.assigned_user_id = $${idx++}`);
+        params.push(assignedUserId);
+    }
+    if (search && search.trim().length >= 2) {
+        clauses.push(`(r.business_name ILIKE $${idx} OR r.phone_number ILIKE $${idx})`);
+        params.push(`%${search.trim()}%`);
+        idx++;
+    }
+    if (dateFrom) {
+        clauses.push(`r.date >= $${idx++}`);
+        params.push(dateFrom);
+    }
+    if (dateTo) {
+        clauses.push(`r.date <= $${idx++}`);
+        params.push(dateTo);
+    }
+    if (businessType && businessType.trim()) {
+        clauses.push(`r.business_type ILIKE $${idx++}`);
+        params.push(`%${businessType.trim()}%`);
+    }
+    if (city && city.trim()) {
+        clauses.push(`r.city ILIKE $${idx++}`);
+        params.push(`%${city.trim()}%`);
+    }
+
+    return { clauses, params, nextIdx: idx };
 }
 
 export default RAW_DATA_FIELDS;

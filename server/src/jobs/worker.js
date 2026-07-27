@@ -1,6 +1,7 @@
 import { connectDB, query } from '../config/db.js';
 import { processCsvJob } from './csvProcessor.js';
 import { processRawDataJob } from './rawDataProcessor.js';
+import { processDeliveryDataJob } from './deliveryDataProcessor.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -70,6 +71,8 @@ async function startImportWorkerLoop() {
 
       if (log.entity_type === 'raw_data') {
         await processRawDataJob(mockJob);
+      } else if (log.entity_type === 'delivery_data') {
+        await processDeliveryDataJob(mockJob);
       } else {
         await processCsvJob(mockJob);
       }

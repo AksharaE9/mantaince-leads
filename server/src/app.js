@@ -22,6 +22,7 @@ import assignmentsRouter from './routes/assignments.js';
 import adminRouter from './routes/admin.js';
 import followUpsRouter from './routes/followUps.js';
 import rawDataRouter from './routes/rawData.js';
+import deliveryDataRouter from './routes/deliveryData.js';
 import { startImportWorkerLoop } from './jobs/worker.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -188,6 +189,7 @@ app.use('/api/v1/assignments', assignmentsRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/followUps', followUpsRouter);
 app.use('/api/v1/raw-data', rawDataRouter);
+app.use('/api/v1/delivery-data', deliveryDataRouter);
 
 // Global list to store the last 50 server-side errors in memory for diagnostics
 global.debugErrors = global.debugErrors || [];

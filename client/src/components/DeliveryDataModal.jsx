@@ -1,21 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { X, Database } from 'lucide-react';
+import { X, Truck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import axios from '../api/axios.js';
 import SearchableOperatorSelect from './SearchableOperatorSelect.jsx';
 import CsvImportModal from './CsvImportModal.jsx';
 
-const RAW_DATA_ENDPOINTS = {
-  schema: () => '/api/v1/raw-data/schema',
-  template: (verticalId, _leadType, format) => `/api/v1/raw-data/import-template?verticalId=${verticalId}${format === 'xlsx' ? '&format=xlsx' : ''}`,
-  upload: () => '/api/v1/raw-data/upload',
-  log: (batchId) => `/api/v1/raw-data/upload-logs/${batchId}`,
-  failedRows: (batchId) => `/api/v1/raw-data/upload-logs/${batchId}/failed-rows`,
+const DELIVERY_DATA_ENDPOINTS = {
+  schema: () => '/api/v1/delivery-data/schema',
+  template: (verticalId, _leadType, format) => `/api/v1/delivery-data/import-template?verticalId=${verticalId}${format === 'xlsx' ? '&format=xlsx' : ''}`,
+  upload: () => '/api/v1/delivery-data/upload',
+  log: (batchId) => `/api/v1/delivery-data/upload-logs/${batchId}`,
+  failedRows: (batchId) => `/api/v1/delivery-data/upload-logs/${batchId}/failed-rows`,
 };
 
 const emptyForm = {
   date: '', employeeName: '', businessType: '', businessName: '', area: '', city: '',
   phoneNumber: '', address: '', appointmentDate: '', appointmentTimings: '', remarks: '',
+  deliveryDate: '', deliveryTime: '',
 };
 
 const FormField = ({ label, required, children }) => (
@@ -28,12 +29,16 @@ const FormField = ({ label, required, children }) => (
 );
 
 /**
- * "Raw Data" feature entry point — Single Add + Bulk Upload (via the
- * shared CsvImportModal, reconfigured with raw-data endpoints). Vertical
- * is always the `vertical` prop (closure state from LeadsPage), never a
- * field on this form — matching how "Add Lead" is auto-scoped.
+ * "Delivery Data" feature entry point — Single Add + Bulk Upload (via the
+ * shared CsvImportModal, reconfigured with delivery-data endpoints). Mirrors
+ * RawDataModal.jsx's structure exactly, plus Delivery Date/Delivery Time.
+ * Vertical is always the `vertical` prop (closure state from LeadsPage),
+ * never a field on this form — matching how Raw Data/Add Lead are scoped.
+ *
+ * Delivery Data is an independent sibling of Raw Data (own table, own
+ * endpoints) — it is not merged into Raw Data's form or table.
  */
-export default function RawDataModal({ open, onClose, vertical, agents = [], onSaved, initialMode = 'single' }) {
+export default function DeliveryDataModal({ open, onClose, vertical, agents = [], onSaved, initialMode = 'single' }) {
   const [mode, setMode] = useState(initialMode); // 'single' | 'bulk'
   const [form, setForm] = useState(emptyForm);
   const [assignedTo, setAssignedTo] = useState('');
@@ -66,7 +71,7 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
     setSaving(true);
     setFieldErrors([]);
     try {
-      const res = await axios.post('/api/v1/raw-data', {
+      const res = await axios.post('/api/v1/delivery-data', {
         verticalId: vertical._id,
         ...form,
         employeeName: selectedAgentName,
@@ -74,7 +79,7 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
       if (res.data.warnings?.length) {
         res.data.warnings.forEach((w) => toast(w.message, { icon: '⚠️' }));
       }
-      toast.success('Raw data record saved.');
+      toast.success('Delivery data record saved.');
       onSaved?.();
       handleClose();
     } catch (err) {
@@ -82,7 +87,7 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
       if (errors?.length) {
         setFieldErrors(errors);
       } else {
-        toast.error(err.response?.data?.error || 'Failed to save raw data record');
+        toast.error(err.response?.data?.error || 'Failed to save delivery data record');
       }
     } finally {
       setSaving(false);
@@ -96,11 +101,11 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
         onClose={handleClose}
         vertical={vertical}
         agents={agents}
-        endpoints={RAW_DATA_ENDPOINTS}
+        endpoints={DELIVERY_DATA_ENDPOINTS}
         showSubVertical={false}
         showAssignOperator={false}
-        filenamePrefix="raw-data"
-        title="Bulk Upload Raw Data"
+        filenamePrefix="delivery-data"
+        title="Bulk Upload Delivery Data"
         onImportComplete={onSaved}
       />
     );
@@ -111,8 +116,8 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
       <div className="glass-panel w-full max-w-2xl p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-[--border] pb-3">
           <h3 className="text-lg font-bold text-[--text-primary] flex items-center gap-2">
-            <Database className="text-[--accent]" size={20} />
-            <span>Add Raw Data</span>
+            <Truck className="text-[--accent]" size={20} />
+            <span>Add Delivery Data</span>
           </h3>
           <button onClick={handleClose} className="p-1 border border-[--border-strong] rounded text-[--text-secondary] hover:bg-stone-50">
             <X size={16} />
@@ -153,8 +158,8 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
               <SearchableOperatorSelect agents={agents} value={assignedTo} onChange={setAssignedTo} placeholder="-- Select employee --" />
             </FormField>
             <FormField label="Business Type">
-              <input type="text" className="w-full" value={form.businessType} onChange={set('businessType')} list="business-type-suggestions" />
-              <datalist id="business-type-suggestions">
+              <input type="text" className="w-full" value={form.businessType} onChange={set('businessType')} list="delivery-business-type-suggestions" />
+              <datalist id="delivery-business-type-suggestions">
                 <option value="Retail" />
                 <option value="Wholesale" />
                 <option value="Manufacturing" />
@@ -182,6 +187,12 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
             <FormField label="Appointment Timings">
               <input type="text" placeholder="e.g. 10:00 AM - 11:00 AM" className="w-full" value={form.appointmentTimings} onChange={set('appointmentTimings')} />
             </FormField>
+            <FormField label="Delivery Date" required>
+              <input type="date" required className="w-full" value={form.deliveryDate} onChange={set('deliveryDate')} />
+            </FormField>
+            <FormField label="Delivery Time" required>
+              <input type="text" required placeholder="e.g. 2:00 PM - 3:00 PM" className="w-full" value={form.deliveryTime} onChange={set('deliveryTime')} />
+            </FormField>
           </div>
           <FormField label="Remarks">
             <textarea className="w-full" rows={3} maxLength={500} value={form.remarks} onChange={set('remarks')} />
@@ -192,7 +203,7 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
               Cancel
             </button>
             <button type="submit" disabled={saving || !assignedTo} className="px-4 py-2 bg-[--accent] text-white rounded-lg font-bold text-sm hover:bg-[--accent-hover] shadow-sm disabled:opacity-40">
-              {saving ? 'Saving...' : 'Save Raw Data'}
+              {saving ? 'Saving...' : 'Save Delivery Data'}
             </button>
           </div>
         </form>

@@ -118,6 +118,9 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.tables
                 WHERE table_name = 'raw_data'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'delivery_data'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -544,6 +547,39 @@ const runMigrations = async () => {
         );
         CREATE INDEX IF NOT EXISTS idx_raw_data_vertical ON raw_data(vertical_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_raw_data_phone ON raw_data(vertical_id, phone_number);
+
+        -- Delivery Data: fourth independent bulk-import feature, sibling of
+        -- Raw Data (own table, own schema) — not merged into raw_data.
+        -- linked_raw_data_id is a nullable, best-effort soft-link auto-set
+        -- at write time by phone/business-name matching; standalone rows
+        -- (no match) are equally valid, never required.
+        CREATE TABLE IF NOT EXISTS delivery_data (
+            id UUID PRIMARY KEY,
+            vertical_id UUID NOT NULL REFERENCES verticals(id) ON DELETE CASCADE,
+            assigned_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            date DATE,
+            business_type VARCHAR(255),
+            business_name VARCHAR(255) NOT NULL,
+            area VARCHAR(255),
+            city VARCHAR(255),
+            phone_number VARCHAR(50),
+            address TEXT,
+            appointment_date DATE,
+            appointment_timings VARCHAR(100),
+            remarks TEXT,
+            delivery_date DATE NOT NULL,
+            delivery_time VARCHAR(100) NOT NULL,
+            linked_raw_data_id UUID REFERENCES raw_data(id) ON DELETE SET NULL,
+            source VARCHAR(20) NOT NULL DEFAULT 'single_add',
+            csv_batch_id UUID REFERENCES csv_upload_logs(id) ON DELETE SET NULL,
+            created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            is_deleted BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_delivery_data_vertical ON delivery_data(vertical_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_delivery_data_phone ON delivery_data(vertical_id, phone_number);
+        CREATE INDEX IF NOT EXISTS idx_delivery_data_linked_raw_data ON delivery_data(linked_raw_data_id);
     `;
 
     // ── Phase 2: Performance Indexes ─────────────────────────────────────────
