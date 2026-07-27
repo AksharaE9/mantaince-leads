@@ -705,6 +705,11 @@ export const LeadsPage = () => {
       },
       { accessorKey: 'phone', header: 'CONTACT' },
       {
+        id: 'assigneeName',
+        header: 'ASSIGNED TO',
+        cell: ({ row }) => row.original.assigneeName || row.original.assignee_name || '-',
+      },
+      {
         id: 'deliveredLocation',
         header: 'MAP LOCATION LINK / ADDRESS',
         cell: ({ row }) => {
