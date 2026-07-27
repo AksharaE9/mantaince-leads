@@ -86,7 +86,22 @@ async function startImportWorkerLoop() {
 }
 
 // ── Bootstrapping Worker ──
-if (process.env.NODE_ENV !== 'test') {
+// Only self-starts when this file is the actual entrypoint (`node
+// server/src/jobs/worker.js`, `npm run worker`, Dockerfile.worker) — NOT
+// when merely imported, as app.js does unconditionally at the top for the
+// startImportWorkerLoop reference it re-exports below.
+//
+// This used to be a bare `NODE_ENV !== 'test'` check with no import-vs-
+// standalone distinction, which caused two real problems: (1) on Vercel,
+// where app.js imports this module for every cold start, it started the
+// infinite polling loop regardless of app.js's own `!process.env.VERCEL`
+// guard around its explicit startImportWorkerLoop() call — a stray
+// connection-holding loop running per serverless container; (2) even
+// locally, app.js's explicit call plus this module's own auto-start meant
+// two independent polling loops running in one process. `FOR UPDATE SKIP
+// LOCKED` makes that safe, not free.
+const isDirectEntrypoint = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+if (process.env.NODE_ENV !== 'test' && isDirectEntrypoint) {
   await connectDB();
   startImportWorkerLoop().catch(err => {
     console.error('Fatal Queue Worker Crash:', err);

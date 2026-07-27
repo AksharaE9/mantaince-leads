@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { runInBackground } from '../utils/background.js';
 import { query } from '../config/db.js';
 import { isValidUUID } from '../utils/validators/index.js';
 import { sendControllerError } from '../utils/dbErrors.js';
@@ -307,12 +308,14 @@ export const uploadDeliveryDataCsv = async (req, res) => {
 
             const uploadLog = logRes.rows[0];
 
+            // Never let an audit-log failure abort before the background job is
+            // registered — that would strand the row at 'processing' forever.
             await logAudit(req, {
                 action: 'delivery_data.upload_processing_vercel',
                 targetCollection: 'csv_upload_logs',
                 targetId: uploadLog.id,
                 after: { originalFileName: file.originalname, status: 'processing' },
-            });
+            }).catch(err => console.error('⚠️ logAudit failed (non-fatal, upload proceeds):', err.message));
 
             const mockJob = {
                 data: {
@@ -327,16 +330,13 @@ export const uploadDeliveryDataCsv = async (req, res) => {
                 }
             };
 
-            // Kick off DeliveryData processing in the background (non-blocking for Vercel)
-            import('../jobs/deliveryDataProcessor.js')
-                .then(({ processDeliveryDataJob }) => processDeliveryDataJob(mockJob))
-                .catch(async (err) => {
-                    console.error('❌ Vercel Inline DeliveryData processing failed:', err);
-                    await query(
-                        "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
-                        [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
-                    ).catch(() => {});
-                });
+            // Kick off DeliveryData processing in the background (non-blocking
+            // for Vercel) — see server/src/utils/background.js for why this
+            // can't be a bare unawaited promise.
+            runInBackground(
+                import('../jobs/deliveryDataProcessor.js').then(({ processDeliveryDataJob }) => processDeliveryDataJob(mockJob)),
+                { batchId: uploadLog.id, label: 'DeliveryData' }
+            );
 
             return res.status(202).json({
                 success: true,

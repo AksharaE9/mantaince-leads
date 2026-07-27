@@ -1,4 +1,5 @@
 import { query } from '../config/db.js';
+import { runInBackground, reapIfStale } from '../utils/background.js';
 import crypto from 'crypto';
 import { logAudit } from '../services/audit.js';
 import { cacheGet } from '../services/cache.js';
@@ -145,12 +146,15 @@ export const uploadCsv = async (req, res) => {
 
             const uploadLog = logRes.rows[0];
 
+            // Never let an audit-log failure abort before the background job is
+            // registered — that would strand the row at 'processing' forever
+            // with no batchId ever returned to the client to look it up.
             await logAudit(req, {
                 action: 'csv.upload_processing_vercel',
                 targetCollection: 'csv_upload_logs',
                 targetId: uploadLog.id,
                 after: { originalFileName: file.originalname, status: 'processing', file_name: fileName }
-            });
+            }).catch(err => console.error('⚠️ logAudit failed (non-fatal, upload proceeds):', err.message));
 
             const mockJob = {
                 data: {
@@ -168,16 +172,19 @@ export const uploadCsv = async (req, res) => {
                 }
             };
 
-            // Kick off CSV processing in the background (non-blocking for Vercel)
-            import('../jobs/csvProcessor.js')
-                .then(({ processCsvJob }) => processCsvJob(mockJob))
-                .catch(async (err) => {
-                    console.error('❌ Vercel Inline CSV processing failed:', err);
-                    await query(
-                        "UPDATE csv_upload_logs SET status = 'failed', errors = $2, processing_finished_at = NOW() WHERE id = $1",
-                        [uploadLog.id, JSON.stringify([{ row: 0, reason: `Vercel inline processing failed: ${err.message}` }])]
-                    ).catch(() => {});
-                });
+            // Kick off CSV processing in the background (non-blocking for Vercel).
+            // runInBackground() uses waitUntil() to keep the function instance
+            // alive until processing settles — without it, Vercel can freeze
+            // the container right after the 202 response, silently stranding
+            // the batch at status='processing' with 0 rows ever inserted
+            // (reproduced empirically during production-readiness testing on
+            // a 3,000-row upload). It never overwrites processCsvJob's own
+            // detailed per-row errors if it already wrote status='failed'
+            // before rethrowing.
+            runInBackground(
+                import('../jobs/csvProcessor.js').then(({ processCsvJob }) => processCsvJob(mockJob)),
+                { batchId: uploadLog.id, label: 'CSV' }
+            );
 
             return res.status(202).json({
                 success: true,
@@ -272,8 +279,14 @@ export const getCsvLogById = async (req, res) => {
         }
 
         const logRes = await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId]);
-        const log = logRes.rows[0];
+        let log = logRes.rows[0];
         if (!log) return res.status(404).json({ success: false, error: 'CSV log not found' });
+
+        // Self-healing: there's no persistent worker on Vercel to retry a batch
+        // that's still 'processing' well past any realistic completion time
+        // (e.g. waitUntil itself hit maxDuration) — the next status poll is the
+        // only recovery point, so check and reap it here.
+        log = await reapIfStale(log);
 
         // Strict Vertical Scoping check
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(log.vertical_id))) {
