@@ -75,6 +75,7 @@ describe('Bulk Lead Import Pipeline Hardening', () => {
 
     afterAll(async () => {
         if (verticalId) {
+            await query('DELETE FROM csv_upload_logs WHERE vertical_id = $1', [verticalId]);
             await query('DELETE FROM raw_data WHERE vertical_id = $1', [verticalId]);
             await query('UPDATE users SET vertical_access = array_remove(vertical_access, $1) WHERE id = $2', [verticalId, agentId]);
             await request(app).delete(`/api/v1/verticals/${verticalId}`).set('Authorization', `Bearer ${adminToken}`);
