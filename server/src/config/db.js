@@ -1,5 +1,8 @@
 import pg from 'pg';
 import AWS from 'aws-sdk';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import {
     PGHOST,
     PGPORT,
@@ -9,6 +12,10 @@ import {
     USE_RDS_IAM,
     AWS_REGION
 } from './env.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const caBundlePath = path.resolve(__dirname, '../../global-bundle.pem');
 
 const { Pool } = pg;
 
@@ -48,19 +55,9 @@ const pool = new Pool({
     // PGSSL=false            → no SSL at all (local dev without SSL)
     // PGSSL_REJECT_UNAUTHORIZED=true  → full cert chain verification (RDS direct)
     // (default / Neon pooler) → encrypt but skip chain verify (rejectUnauthorized: false)
-    //
-    // Why rejectUnauthorized: false for Neon's pooler endpoint?
-    // Neon's PgBouncer pooler (ep-xxx-pooler.*.neon.tech) uses TLS but its
-    // certificate chain (Let's Encrypt YR1/YR2 → ISRG Root X1) is not present
-    // in Vercel's stripped Node.js runtime CA bundle.  Passing an explicit `ca`
-    // does NOT fix this — it replaces the entire CA store rather than adding to
-    // it, so the intermediates are still missing.  Neon explicitly recommends
-    // rejectUnauthorized:false for their pooler on serverless runtimes.
-    // The connection is still TLS-encrypted; only chain-of-trust verification
-    // is relaxed.  For a direct RDS instance (full cert store), set
-    // PGSSL_REJECT_UNAUTHORIZED=true in the Vercel environment.
     ssl: process.env.PGSSL === 'false' ? false : {
-        rejectUnauthorized: process.env.PGSSL_REJECT_UNAUTHORIZED === 'true'
+        rejectUnauthorized: process.env.PGSSL_REJECT_UNAUTHORIZED === 'true',
+        ca: fs.existsSync(caBundlePath) ? fs.readFileSync(caBundlePath).toString() : undefined
     },
     // Pool settings for Vercel's fan-out serverless model: each concurrent
     // instance gets its own independent pool, and Neon's `-pooler` endpoint
