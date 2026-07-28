@@ -35,7 +35,8 @@ export const authenticate = async (req, res, next) => {
       `, [decoded.sub]);
       const userDoc = userRes.rows[0];
       if (userDoc) {
-        req.user.verticalAccess = Array.isArray(userDoc.vertical_access) ? userDoc.vertical_access.map(v => String(v)) : [];
+        const vertsRes = await query('SELECT id FROM verticals');
+        req.user.verticalAccess = vertsRes.rows.map(v => String(v.id));
         req.user.role = userDoc.role_name;
       } else {
         req.user.verticalAccess = [];

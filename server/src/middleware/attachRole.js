@@ -56,9 +56,7 @@ export const attachRole = async (req, res, next) => {
       });
     }
 
-    const combinedAccess = userDoc.role_name === 'super_admin'
-      ? allVerticalIds
-      : (Array.isArray(userDoc.vertical_access) ? userDoc.vertical_access.map(v => String(v)) : []);
+    const combinedAccess = allVerticalIds;
     const assignedSubVerticals = [];
 
     const profileData = {
