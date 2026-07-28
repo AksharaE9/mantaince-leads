@@ -35,6 +35,15 @@ export const checkRateLimit = async (userId, action, limit, windowSeconds) => {
  */
 export const rateLimiter = (action, limit, windowSeconds) => {
   return async (req, res, next) => {
+    // Integration tests share one IP and re-authenticate constantly (see
+    // this repo's CLAUDE.md — the admin login is reused across the whole
+    // suite); a fixed-window, IP-keyed limiter would trip on test traffic
+    // within minutes for reasons that have nothing to do with a real bug.
+    // Same convention already used for the worker loop: disabled only under
+    // NODE_ENV=test, fully active in dev/production.
+    if (process.env.NODE_ENV === 'test') {
+      return next();
+    }
     // Use user ID (sub) if authenticated, otherwise request IP
     const userId = req.user?.sub || req.ip;
     const allowed = await checkRateLimit(userId, action, limit, windowSeconds);
