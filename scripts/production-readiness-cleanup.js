@@ -78,10 +78,21 @@ async function runViaApi() {
         return;
     }
 
+    // Deleted with bounded concurrency (not fully sequential — a few thousand
+    // tagged rows at ~1 req/s each would take minutes; not fully parallel
+    // either, out of the same self-inflicted-DoS caution as runReadLoad).
     let deleted = 0, failed = 0;
-    for (const row of rows) {
-        const res = await fetch(`${baseUrl}/api/v1/leads/${row.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-        if (res.status === 200 || res.status === 204) deleted++; else { failed++; console.log('  delete failed:', row.id, res.status); }
+    const CONCURRENCY = 20;
+    for (let i = 0; i < rows.length; i += CONCURRENCY) {
+        const batch = rows.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(batch.map(row =>
+            fetch(`${baseUrl}/api/v1/leads/${row.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+                .then(res => ({ id: row.id, ok: res.status === 200 || res.status === 204, status: res.status }))
+                .catch(err => ({ id: row.id, ok: false, status: 0, err: err.message }))
+        ));
+        for (const r of results) {
+            if (r.ok) deleted++; else { failed++; console.log('  delete failed:', r.id, r.status || r.err); }
+        }
     }
     console.log(`Deleted ${deleted}, failed ${failed}.`);
 
