@@ -137,6 +137,9 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.tables
                 WHERE table_name = 'realtime_events'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cost_conversions' AND column_name = 'promoted_at'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
