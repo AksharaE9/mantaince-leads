@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { 
   ClipboardList, User, Clock, Calendar as CalendarIcon, 
@@ -105,8 +105,9 @@ export const FollowUpsPage = () => {
     fetchAgents();
   }, [activeVertical]);
 
-  // Fetch follow-ups based on filters
-  const fetchFollowUps = async () => {
+  // Fetch follow-ups based on filters — useCallback so leadsRefreshTrigger
+  // always re-runs with the latest activeVertical / dateStr / subVertical.
+  const fetchFollowUps = useCallback(async () => {
     if (!activeVertical?._id) return;
     setLoading(true);
     try {
@@ -124,14 +125,14 @@ export const FollowUpsPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeVertical, selectedSubVerticalId, dateStr]);
 
   useEffect(() => {
     fetchFollowUps();
-  }, [activeVertical, selectedSubVerticalId, dateStr, leadsRefreshTrigger]);
+  }, [fetchFollowUps, leadsRefreshTrigger]);
 
   // Fetch vertical stats dashboard
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     if (!activeVertical?._id || !isAdmin) {
       setStats(null);
       return;
@@ -150,11 +151,11 @@ export const FollowUpsPage = () => {
     } finally {
       setLoadingStats(false);
     }
-  };
+  }, [activeVertical, selectedSubVerticalId, dateStr, isAdmin]);
 
   useEffect(() => {
     fetchStats();
-  }, [activeVertical, selectedSubVerticalId, dateStr, leadsRefreshTrigger]);
+  }, [fetchStats, leadsRefreshTrigger]);
 
   // Fetch field status details
   useEffect(() => {

@@ -272,6 +272,7 @@ export const FollowUpsPositivesPage = () => {
         sortDir,
         leadType: 'POSITIVE',
       });
+      if (agentFilter) qParams.set('assignedTo', agentFilter);
       if (dateFromFilter) qParams.set('dateFrom', dateFromFilter);
       if (dateToFilter) qParams.set('dateTo', dateToFilter);
       if (csvBatchId) qParams.set('csvBatchId', csvBatchId);

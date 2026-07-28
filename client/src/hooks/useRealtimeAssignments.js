@@ -49,6 +49,13 @@ export function useRealtimeAssignments() {
 
   useEffect(() => { activeVerticalRef.current = activeVertical; }, [activeVertical]);
 
+  // Defensive helper: server may return { id } while the store/client uses { _id }.
+  // Always prefer _id first (set by legacy vertical-selection code) then fall back to id.
+  const getActiveVerticalId = useCallback(() => {
+    const v = activeVerticalRef.current;
+    return v?._id || v?.id || null;
+  }, []);
+
   const debouncedTriggerLeadsRefresh = useCallback(() => {
     clearTimeout(refreshDebounceRef.current);
     refreshDebounceRef.current = setTimeout(triggerLeadsRefresh, REFRESH_DEBOUNCE_MS);
@@ -73,7 +80,11 @@ export function useRealtimeAssignments() {
       let shouldRefresh = false;
       for (const evt of events || []) {
         if (VERTICAL_SCOPED_TYPES.has(evt.type)) {
-          if (evt.verticalId && evt.verticalId === activeVerticalRef.current?._id) {
+          const activeVId = getActiveVerticalId();
+          // If the event carries a verticalId, only refresh when it matches the
+          // currently active vertical. If either side is missing, we err on the
+          // side of refreshing (failsafe) to avoid silently dropping events.
+          if (!evt.verticalId || !activeVId || evt.verticalId === activeVId) {
             shouldRefresh = true;
           }
         } else if (UNSCOPED_REFRESH_TYPES.has(evt.type)) {
@@ -89,7 +100,7 @@ export function useRealtimeAssignments() {
     } finally {
       pollInFlightRef.current = false;
     }
-  }, [debouncedTriggerLeadsRefresh]);
+  }, [debouncedTriggerLeadsRefresh, getActiveVerticalId]);
 
   useEffect(() => {
     if (!user || !accessToken) {
