@@ -10,13 +10,11 @@ const router = express.Router();
 router.use(authenticate);
 router.use(attachRole);
 
-// NOTE: 'leads:read_own' was previously OR'd in here, letting any agent
-// enumerate the full user directory (emails, permission arrays) — that
-// permission is meant for scoping lead visibility, not user-directory
-// access. 'users:read' is an existing key (granted to vertical_admin and
-// super_admin's '*' wildcard — see config/seed.js) already used elsewhere
-// in this file; reused here rather than inventing a new permission string.
-router.get('/', checkPermission('users:read'), getUsers);
+// NOTE: 'users:read' is required to read full user directory details.
+// To allow agents to load list of active operators for assigning leads,
+// we also accept 'leads:read' and 'leads:read_own'. The controller
+// sanitizes the output fields when the caller lacks 'users:read'.
+router.get('/', checkPermission(['users:read', 'leads:read', 'leads:read_own']), getUsers);
 router.post('/invite', checkPermission('users:invite'), inviteUser);
 router.get('/:id', checkPermission('users:read'), getUserById);
 router.patch('/:id', checkPermission('users:update'), updateUser);

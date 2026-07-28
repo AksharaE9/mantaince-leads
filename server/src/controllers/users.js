@@ -57,7 +57,20 @@ export const getUsers = async (req, res) => {
     const usersRes = await query(sql, params);
     const users = usersRes.rows;
 
-    return res.status(200).json({ success: true, data: users });
+    // Redact sensitive details if the caller does not have broad users:read permission
+    const hasUsersRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('users:read');
+    let sanitizedUsers = users;
+    if (!hasUsersRead) {
+      sanitizedUsers = users.map(u => ({
+        id: u.id,
+        name: u.name,
+        role_name: u.role_name,
+        is_active: u.is_active,
+        is_approved: u.is_approved
+      }));
+    }
+
+    return res.status(200).json({ success: true, data: sanitizedUsers });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
