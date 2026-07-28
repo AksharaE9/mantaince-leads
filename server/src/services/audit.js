@@ -19,13 +19,26 @@ function redactSensitiveFields(obj) {
 }
 
 /**
- * Log an audit trail entry
- * Runs via runInBackground() (waitUntil-backed) instead of setImmediate so the
- * insert survives Vercel freezing/reusing the instance right after the
- * response is sent — the same failure mode runInBackground was built to
- * prevent for the upload pipeline (see utils/background.js, csv.js).
+ * Log an audit trail entry.
+ *
+ * By default runs via runInBackground() (waitUntil-backed) instead of
+ * setImmediate so the insert survives Vercel freezing/reusing the instance
+ * right after the response is sent — the same failure mode runInBackground
+ * was built to prevent for the upload pipeline (see utils/background.js,
+ * csv.js). This is correct and intentional for routine per-request CRUD
+ * audit logging, where added latency on every request is not worth it.
+ *
+ * Pass `awaitWrite: true` for rare, high-stakes bulk operations (e.g. the
+ * duplicate-scan and promote-to-follow-ups bulk endpoints) where the audit
+ * trail for that specific call must be guaranteed to exist before the
+ * response returns — found necessary in practice: a short-lived caller
+ * process exiting immediately after the last of several sequential bulk
+ * calls lost the final call's fire-and-forget audit write entirely, since
+ * nothing outside real Vercel infrastructure keeps `waitUntil()` promises
+ * alive past process exit. The extra round-trip latency is negligible next
+ * to these operations' own multi-second-to-minute runtime.
  */
-export const logAudit = async (req, { action, targetCollection, targetId, before, after, metadata = {}, executionTimeMs = null }) => {
+export const logAudit = async (req, { action, targetCollection, targetId, before, after, metadata = {}, executionTimeMs = null, awaitWrite = false }) => {
   const auditId = crypto.randomUUID();
 
   // Determine actor
@@ -57,6 +70,11 @@ export const logAudit = async (req, { action, targetCollection, targetId, before
     console.error('❌ Failed to write audit log:', error.message);
     throw error;
   });
+
+  if (awaitWrite) {
+    await jobPromise.catch(() => {}); // already logged above; don't let a write failure break the caller
+    return;
+  }
 
   // Fire-and-forget from the caller's perspective (does not block the
   // request), but waitUntil() keeps the instance alive until it settles.

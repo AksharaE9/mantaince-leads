@@ -1198,6 +1198,7 @@ export const scanCosDuplicates = async (req, res) => {
                     groups: groups.map(g => ({ phone: g.phone, keptId: g.kept.id, duplicateIds: g.duplicates.map(d => d.id) })),
                 },
                 metadata: { agentId: agentId || null },
+                awaitWrite: true,
             });
             await invalidateOnLeadChange(verticalId, null);
             broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'duplicates_removed' });

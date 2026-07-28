@@ -666,6 +666,7 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
         targetId: verticalId,
         after: { promoted, costConversionIds: promotedIds },
         metadata: { agentId: agentId || null },
+        awaitWrite: true,
       });
       await cacheDeletePattern('calendar:*');
       broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'bulk_promote' });
