@@ -23,11 +23,27 @@ import {
 import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
 import checkPermission from '../middleware/checkPermission.js';
+import { rateLimiter } from '../middleware/rateLimit.js';
 
 const router = express.Router();
+
+// M9: geotag photo uploads only — unlike csvUpload below, this previously had
+// no fileFilter at all, so any file type (including .svg/.html) could be
+// uploaded and later served back as stored content (stored-XSS risk).
+// Restricted to the standard raster image types the photo-capture UI
+// actually produces.
+const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB file limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB file limit
+  fileFilter: (req, file, cb) => {
+    if (!IMAGE_MIME_TYPES.has(file.mimetype)) {
+      const err = new Error('Only JPEG, PNG, WEBP, or GIF images are accepted');
+      err.status = 400;
+      return cb(err);
+    }
+    cb(null, true);
+  }
 });
 
 // CSV/Excel lead-import uploads only — reject anything else with a clean 400
@@ -60,7 +76,11 @@ router.use(attachRole);
 // CSV Upload specific routes
 router.get('/csv/template/:verticalId', checkPermission('csv:template'), downloadCsvTemplate);
 router.get('/csv/schema/:verticalId', checkPermission('csv:template'), getImportSchema);
-router.post('/csv/upload', checkPermission('csv:upload'), csvUpload.single('file'), uploadCsv);
+// C5: rate-limit bulk uploads — each one now holds a Vercel instance open
+// via waitUntil, so unbounded uploads are also a cost-DoS vector, not just
+// an abuse vector. 20/hour per user (falls back to IP for unauthenticated
+// callers, though this route is already behind `authenticate`).
+router.post('/csv/upload', checkPermission('csv:upload'), rateLimiter('leads_csv_upload', 20, 3600), csvUpload.single('file'), uploadCsv);
 router.get('/csv/logs', checkPermission('csv:logs'), getCsvLogs);
 router.get('/csv/logs/:batchId', checkPermission(['csv:logs', 'csv:upload']), getCsvLogById);
 router.get('/csv/logs/:batchId/failed-rows', checkPermission(['csv:logs', 'csv:upload']), streamFailedRows);
@@ -74,7 +94,9 @@ router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exp
 router.get('/:id', checkPermission(['leads:read', 'leads:read_own']), getCostConversionById);
 router.patch('/:id', checkPermission(['leads:update', 'leads:update_own']), updateCostConversion);
 router.delete('/:id', checkPermission(['leads:delete', 'leads:delete_own']), deleteCostConversion);
-router.post('/:id/photo', checkPermission(['leads:update', 'leads:update_own']), upload.single('photo'), uploadCostConversionPhoto);
+// C5: rate-limit photo uploads for the same cost-DoS/abuse reasons as the
+// CSV upload route above.
+router.post('/:id/photo', checkPermission(['leads:update', 'leads:update_own']), rateLimiter('leads_photo_upload', 20, 3600), upload.single('photo'), uploadCostConversionPhoto);
 
 router.patch('/:id/status', checkPermission(['leads:update', 'leads:update_own']), updateCostConversionStatus);
 router.patch('/:id/assign', checkPermission('vertical:read'), assignCostConversion);

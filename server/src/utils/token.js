@@ -32,9 +32,17 @@ export const hashToken = (token) => {
 
 /**
  * Verify Access Token
+ * Normal access tokens (see signAccessToken) never carry a `type` field —
+ * only special-purpose tokens (e.g. SSE tickets, type: 'sse_ticket') do.
+ * Reject anything that isn't a plain access token so single-use/SSE-only
+ * tokens can't be replayed as general bearer tokens.
  */
 export const verifyAccessToken = (token) => {
-  return jwt.verify(token, JWT_ACCESS_SECRET);
+  const decoded = jwt.verify(token, JWT_ACCESS_SECRET);
+  if (decoded && typeof decoded === 'object' && decoded.type) {
+    throw new jwt.JsonWebTokenError('Invalid access token type');
+  }
+  return decoded;
 };
 
 /**

@@ -26,9 +26,9 @@ router.use(attachRole);
 router.get('/', getVerticals);
 router.post('/', checkPermission('vertical:create'), createVertical);
 router.get('/:id', getVerticalById);
+router.patch('/reorder', checkPermission('vertical:reorder'), reorderVerticals);
 router.patch('/:id', checkPermission('vertical:update'), updateVertical);
 router.delete('/:id', checkPermission('vertical:delete'), deleteVertical);
-router.patch('/reorder', checkPermission('vertical:reorder'), reorderVerticals);
 
 // Nested Sub-Verticals CRUD
 router.get('/:verticalId/sub-verticals', getSubVerticals);

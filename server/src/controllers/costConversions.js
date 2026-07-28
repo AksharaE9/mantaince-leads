@@ -18,10 +18,26 @@ import { bulkInsert } from '../db/bulkInsert.js';
 import { sendControllerError } from '../utils/dbErrors.js';
 
 // ── CSV escape helper (module-level, reused by export) ────────────────────────
+// H5: prefix any value whose first character Excel/Sheets treats as a
+// formula trigger (=, +, -, @, tab, CR) with a literal single-quote BEFORE
+// the quote-doubling below runs, so e.g. `=cmd|'/c calc'!A1` in an uploaded
+// BUSINESS NAME downloads as literal text instead of executing as a formula
+// when an admin later opens the exported CSV.
 const escapeCsvVal = (val) => {
     if (val === undefined || val === null) return '';
-    return val.toString().replace(/"/g, '""');
+    const s = val.toString();
+    const guarded = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+    return guarded.replace(/"/g, '""');
 };
+
+// L3: DB-stored, admin-configurable validation_regex fields are tested
+// directly against user input with `new RegExp(...).test(...)`. A
+// maliciously or accidentally catastrophic pattern (e.g. `(a+)+$`) could
+// hang the request indefinitely — Node has no built-in regex-exec timeout.
+// Capping the length of the string being tested bounds most catastrophic-
+// backtracking blowups in practice (exponential cost is driven by input
+// length) without needing a worker-thread/timeout mechanism.
+const MAX_REGEX_TEST_LENGTH = 1000;
 
 // ── Cursor helpers ─────────────────────────────────────────────────────────────
 function encodeCursor(createdAt, id) {
@@ -145,8 +161,16 @@ export const getCostConversions = async (req, res) => {
         // ── Full-text search vs. ILIKE fallback ───────────────────────────
         if (search && search.trim().length >= 2) {
             const q = search.trim();
-            if (q.includes(' ') || q.length >= 4) {
-                const tsQuery = q.trim().split(/\s+/).map(w => `${w}:*`).join(' & ');
+            // L2: strip tsquery special syntax characters from each word
+            // before appending `:*` — otherwise a search term containing
+            // &, |, !, (, ), *, or ' produces a to_tsquery syntax error that
+            // surfaces as a raw 500. Normal alphanumeric searches are
+            // untouched by this.
+            const tsWords = q.split(/\s+/)
+                .map(w => w.replace(/[&|!():*']/g, ''))
+                .filter(Boolean);
+            if (tsWords.length > 0 && (q.includes(' ') || q.length >= 4)) {
+                const tsQuery = tsWords.map(w => `${w}:*`).join(' & ');
                 wheres.push(`l.search_vector @@ to_tsquery('english', $${pIdx++})`);
                 params.push(tsQuery);
             } else {
@@ -348,9 +372,14 @@ export const createCostConversion = async (req, res) => {
                 
                 if (val !== undefined && val !== null && val !== '') {
                     if (field.validation_regex) {
+                        const testVal = val.toString();
+                        // L3: length cap before testing — see MAX_REGEX_TEST_LENGTH comment above.
+                        if (testVal.length > MAX_REGEX_TEST_LENGTH) {
+                            return res.status(400).json({ success: false, error: field.validation_message || `'${field.field_key}' is too long to validate (max ${MAX_REGEX_TEST_LENGTH} characters)` });
+                        }
                         try {
                             const rx = new RegExp(field.validation_regex);
-                            if (!rx.test(val.toString())) {
+                            if (!rx.test(testVal)) {
                                 return res.status(400).json({ success: false, error: field.validation_message || `Invalid format for '${field.field_key}'` });
                             }
                         } catch (e) {
@@ -554,9 +583,14 @@ export const updateCostConversion = async (req, res) => {
                     
                     if (val !== undefined && val !== null && val !== '') {
                         if (field.validation_regex) {
+                            const testVal = val.toString();
+                            // L3: length cap before testing — see MAX_REGEX_TEST_LENGTH comment above.
+                            if (testVal.length > MAX_REGEX_TEST_LENGTH) {
+                                return res.status(400).json({ success: false, error: field.validation_message || `'${field.field_key}' is too long to validate (max ${MAX_REGEX_TEST_LENGTH} characters)` });
+                            }
                             try {
                                 const rx = new RegExp(field.validation_regex);
-                                if (!rx.test(val.toString())) {
+                                if (!rx.test(testVal)) {
                                     return res.status(400).json({ success: false, error: field.validation_message || `Invalid format for '${field.field_key}'` });
                                 }
                             } catch (e) {

@@ -24,6 +24,9 @@ import followUpsRouter from './routes/followUps.js';
 import rawDataRouter from './routes/rawData.js';
 import deliveryDataRouter from './routes/deliveryData.js';
 import { startImportWorkerLoop } from './jobs/worker.js';
+import authenticate from './middleware/authenticate.js';
+import attachRole from './middleware/attachRole.js';
+import checkPermission from './middleware/checkPermission.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import net from 'net';
@@ -82,22 +85,27 @@ app.use(cors({
     if (!origin) {
       return callback(null, true);
     }
-    const isLocalhost = 
-      origin.startsWith('http://localhost:') || 
-      origin.startsWith('http://127.0.0.1:') ||
-      origin === 'http://localhost' ||
-      origin === 'http://127.0.0.1';
 
-    const isAllowed = 
+    // Dev-only convenience: localhost/127.0.0.1 on any port. Never allowed
+    // in production, since the refresh-token cookie is sameSite:'none' in
+    // prod and a permissive origin check here would let any site read it
+    // via a credentialed fetch.
+    const isLocalhost =
+      process.env.NODE_ENV !== 'production' && (
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('http://127.0.0.1:') ||
+        origin === 'http://localhost' ||
+        origin === 'http://127.0.0.1'
+      );
+
+    // Explicit allow-list of the real production frontend origin(s) only —
+    // NOT a `.vercel.app` suffix match, which would let any attacker's
+    // free Vercel deployment pass `credentials: true` CORS checks.
+    const isAllowed =
       origin === CLIENT_URL ||
-      origin === 'http://localhost:5173' ||
-      origin === 'http://localhost:3000' ||
-      origin === 'http://127.0.0.1:5173' ||
-      origin === 'http://127.0.0.1:3000' ||
       origin === 'https://mantaince-leads.vercel.app' ||
-      origin.endsWith('.vercel.app') ||
       isLocalhost;
-      
+
     if (isAllowed) {
       callback(null, true);
     } else {
@@ -166,8 +174,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Compression verification endpoint (placed before auth routers to avoid intercepting middlewares)
+// Compression verification endpoint (placed before auth routers to avoid intercepting middlewares).
+// Dev/staging diagnostic only — hidden entirely in production. The payload
+// itself carries no sensitive data (a static filler string), so no
+// auth/permission gate is added on top of the NODE_ENV check.
 app.get('/api/v1/compression-test-payload', (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ success: false, error: 'Not found' });
+  }
   res.json({
     message: 'This is a large test payload to verify response compression is active on the server.',
     data: 'a'.repeat(2000)
@@ -194,7 +208,23 @@ app.use('/api/v1/delivery-data', deliveryDataRouter);
 // Global list to store the last 50 server-side errors in memory for diagnostics
 global.debugErrors = global.debugErrors || [];
 
-app.get('/api/v1/debug-errors', (req, res) => {
+// Dev/staging diagnostic only. Hidden entirely (404) in production before any
+// auth work runs, and gated behind authenticate+attachRole+checkPermission
+// (same pattern as other protected routes, e.g. server/src/routes/admin.js)
+// for non-production environments, since it leaks stack traces, raw DB error
+// detail, and env-var presence flags.
+app.get(
+  '/api/v1/debug-errors',
+  (req, res, next) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ success: false, error: 'Not found' });
+    }
+    next();
+  },
+  authenticate,
+  attachRole,
+  checkPermission('reports:read'),
+  (req, res) => {
   res.status(200).json({
     success: true,
     vercel: !!process.env.VERCEL,
@@ -210,7 +240,8 @@ app.get('/api/v1/debug-errors', (req, res) => {
     },
     errors: global.debugErrors || []
   });
-});
+  }
+);
 
 // Serve static uploads with caching headers
 app.use('/uploads', express.static(path.join(__dirname, '../../uploads'), {
@@ -296,12 +327,16 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Fallback internal error
+  // Fallback internal error. Full stack/message is logged server-side above
+  // (console.error) regardless of environment; only non-production
+  // responses include it in the JSON body sent to the client.
   const response = {
     success: false,
-    error: 'An internal server error occurred during transaction processing.',
-    details: err.stack || err.message
+    error: 'An internal server error occurred during transaction processing.'
   };
+  if (process.env.NODE_ENV !== 'production') {
+    response.details = err.stack || err.message;
+  }
 
   return res.status(err.status || 500).json(response);
 });

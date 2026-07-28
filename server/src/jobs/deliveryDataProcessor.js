@@ -142,9 +142,9 @@ export const processDeliveryDataJob = async (job) => {
             // Date-object timezone-reinterpretation ambiguity entirely.
             const existingRes = await query(
                 `SELECT phone_number, to_char(delivery_date, 'YYYY-MM-DD') AS delivery_date_str, delivery_time
-                 FROM delivery_data 
-                 WHERE vertical_id = $1 AND is_deleted = false 
-                   AND regexp_replace(phone_number, '[^\\d+]', '', 'g') = ANY($2)`,
+                 FROM delivery_data
+                 WHERE vertical_id = $1 AND is_deleted = false
+                   AND phone_number = ANY($2)`,
                 [verticalId, uniquePhones]
             );
             existingDupKeys = new Set(existingRes.rows.map(r =>

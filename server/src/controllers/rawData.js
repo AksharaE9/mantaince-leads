@@ -20,6 +20,17 @@ import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ── CSV formula-injection guard (H5) ────────────────────────────────────────
+// Prefix any value whose first character Excel/Sheets treats as a formula
+// trigger (=, +, -, @, tab, CR) with a literal single-quote BEFORE the
+// normal quote-doubling/wrapping runs, so a value like `=cmd|'/c calc'!A1`
+// downloads as literal text instead of executing as a formula when an admin
+// opens the exported file.
+const sanitizeCsvValue = (val) => {
+    const s = String(val ?? '');
+    return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+};
+
 /**
  * GET /raw-data
  * Same empty/omitted-query-param safety as getCostConversions — none of
@@ -132,7 +143,7 @@ export const exportRawDataCsv = async (req, res) => {
             ORDER BY ${sortCol} ${sortDirection}
         `, params);
 
-        const csvLine = (vals) => vals.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+        const csvLine = (vals) => vals.map(v => `"${sanitizeCsvValue(v).replace(/"/g, '""')}"`).join(',');
         const headers = RAW_DATA_FIELDS.map(f => f.label);
         const lines = [csvLine(headers)];
         for (const row of rowsRes.rows) {
@@ -252,7 +263,7 @@ export const downloadRawDataTemplate = async (req, res) => {
 
         const headers = RAW_DATA_FIELDS.map(f => f.csvHeader);
         const sampleRow = RAW_DATA_FIELDS.map(f => sampleValues[f.key] ?? '');
-        const csvLine = (vals) => vals.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+        const csvLine = (vals) => vals.map(v => `"${sanitizeCsvValue(v).replace(/"/g, '""')}"`).join(',');
         const csvContent = csvLine(headers) + '\n' + csvLine(sampleRow) + '\n';
 
         res.setHeader('Content-Type', 'text/csv');

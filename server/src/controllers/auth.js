@@ -37,6 +37,12 @@ const clearRefreshCookie = (res) => {
 };
 
 /**
+ * Minimal password strength check.
+ */
+const MIN_PASSWORD_LENGTH = 8;
+const isPasswordStrong = (password) => typeof password === 'string' && password.length >= MIN_PASSWORD_LENGTH;
+
+/**
  * POST /login
  */
 export const login = async (req, res) => {
@@ -63,7 +69,7 @@ export const login = async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
-      console.log(`[Login Failed] Password mismatch for email: "${email}". Received password length: ${password?.length}, password: "${password}"`);
+      console.log('[Login Failed]', { email, reason: 'password_mismatch' });
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
     }
 
@@ -275,8 +281,10 @@ export const forgotPassword = async (req, res) => {
     const resetToken = crypto.randomBytes(32).toString('hex');
     const resetTokenExpiry = new Date(Date.now() + 3600000); // 1 hour
 
+    // Store only a hash of the reset token (like sessions.token_hash) — the raw
+    // token is only ever sent to the user via email/response, never persisted.
     await query('UPDATE users SET invite_token = $1, invite_token_expiry = $2 WHERE id = $3', [
-      resetToken,
+      hashToken(resetToken),
       resetTokenExpiry,
       user.id
     ]);
@@ -317,10 +325,14 @@ export const forgotPassword = async (req, res) => {
 export const resetPassword = async (req, res) => {
   const { token, newPassword } = req.body;
   try {
+    if (!isPasswordStrong(newPassword)) {
+      return res.status(400).json({ success: false, error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters long` });
+    }
+
     const userRes = await query(`
-      SELECT * FROM users 
+      SELECT * FROM users
       WHERE invite_token = $1 AND invite_token_expiry > NOW()
-    `, [token]);
+    `, [hashToken(token || '')]);
     const user = userRes.rows[0];
 
     if (!user) {
@@ -329,10 +341,13 @@ export const resetPassword = async (req, res) => {
 
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
     await query(`
-      UPDATE users 
+      UPDATE users
       SET password_hash = $1, invite_token = NULL, invite_token_expiry = NULL, updated_at = NOW()
       WHERE id = $2
     `, [newPasswordHash, user.id]);
+
+    // Invalidate all existing sessions so a stolen refresh token can't survive a password reset.
+    await query('DELETE FROM sessions WHERE user_id = $1', [user.id]);
 
     await logAudit(null, {
       action: 'user.password_reset',
@@ -364,8 +379,15 @@ export const changePassword = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Current password is incorrect' });
     }
 
+    if (!isPasswordStrong(newPassword)) {
+      return res.status(400).json({ success: false, error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters long` });
+    }
+
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
     await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newPasswordHash, user.id]);
+
+    // Invalidate all existing sessions so a stolen refresh token can't survive a password change.
+    await query('DELETE FROM sessions WHERE user_id = $1', [user.id]);
 
     await logAudit(req, {
       action: 'user.change_password',
@@ -389,6 +411,10 @@ export const register = async (req, res) => {
     if (token) {
       if (!password) {
         return res.status(400).json({ success: false, error: 'Password is required' });
+      }
+
+      if (!isPasswordStrong(password)) {
+        return res.status(400).json({ success: false, error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters long` });
       }
 
       // Find user by invite token
@@ -456,6 +482,10 @@ export const register = async (req, res) => {
     } else {
       if (!name || !email || !password) {
         return res.status(400).json({ success: false, error: 'Name, email, and password are required' });
+      }
+
+      if (!isPasswordStrong(password)) {
+        return res.status(400).json({ success: false, error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters long` });
       }
 
       const existsRes = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);

@@ -14,6 +14,17 @@ import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ── CSV formula-injection guard (H5) ────────────────────────────────────────
+// Prefix any value whose first character Excel/Sheets treats as a formula
+// trigger (=, +, -, @, tab, CR) with a literal single-quote BEFORE the
+// normal quote-doubling/wrapping runs, so e.g. `=cmd|'/c calc'!A1` downloads
+// as the literal text `'=cmd|'/c calc'!A1` instead of executing as a formula
+// when an admin opens the exported/error-report file.
+const sanitizeCsvValue = (val) => {
+    const s = String(val ?? '');
+    return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+};
+
 const SAMPLE_VALUES = {
     date: '2026-07-24', employeeName: 'Jane Doe', businessType: 'Retail',
     businessName: 'Acme Traders', phone: '9876543210', pointOfContact: 'Rahul Sharma',
@@ -66,7 +77,7 @@ export const downloadCsvTemplate = async (req, res) => {
 
         const headers = schema.map(f => f.csvHeader);
         const sampleRow = schema.map(f => SAMPLE_VALUES[f.key] ?? (f.type === 'enum' ? (f.options?.[0] || '') : ''));
-        const csvLine = (vals) => vals.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+        const csvLine = (vals) => vals.map(v => `"${sanitizeCsvValue(v).replace(/"/g, '""')}"`).join(',');
         const csvContent = csvLine(headers) + '\n' + csvLine(sampleRow) + '\n';
 
         // ETag based on the header list fingerprint — prevents re-download if configs haven't changed
@@ -246,9 +257,19 @@ export const getCsvLogs = async (req, res) => {
             params.push(req.user.verticalAccess);
         }
 
-        const limitNum = parseInt(limit, 10);
-        const offset = (parseInt(page, 10) - 1) * limitNum;
-        sql += ` ORDER BY l.created_at DESC LIMIT ${limitNum} OFFSET ${offset}`;
+        // M10: clamp to a sane upper bound and bind LIMIT/OFFSET as query
+        // parameters instead of string-interpolating — matches rawData.js's
+        // getRawData pattern. Prevents ?limit=99999999 (unbounded table
+        // scan) and a non-numeric limit producing `LIMIT NaN` (a raw
+        // Postgres syntax error surfaced as a bare 500).
+        const limitNum = Math.min(parseInt(limit, 10) || 15, 100);
+        const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+        const offset = (pageNum - 1) * limitNum;
+
+        params.push(limitNum, offset);
+        const limitIdx = params.length - 1;
+        const offsetIdx = params.length;
+        sql += ` ORDER BY l.created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
 
         const logsRes = await query(sql, params);
         return res.status(200).json({ success: true, data: logsRes.rows });
@@ -282,12 +303,11 @@ export const getCsvLogById = async (req, res) => {
         let log = logRes.rows[0];
         if (!log) return res.status(404).json({ success: false, error: 'CSV log not found' });
 
-        // Self-healing: there's no persistent worker on Vercel to retry a batch
-        // that's still 'processing' well past any realistic completion time
-        // (e.g. waitUntil itself hit maxDuration) — the next status poll is the
-        // only recovery point, so check and reap it here.
-        log = await reapIfStale(log);
-
+        // M7: authorization MUST run before reapIfStale below — reapIfStale
+        // issues a DB UPDATE, so running it before these checks would let an
+        // unauthorized caller who merely guesses/obtains another tenant's
+        // batchId flip that batch's status as a side effect of a request
+        // that ultimately returns 403.
         // Strict Vertical Scoping check
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(log.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
@@ -297,6 +317,13 @@ export const getCsvLogById = async (req, res) => {
         if (!hasDbLogsPermission && log.uploaded_by !== req.user.sub) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have permission to view other users\' upload logs' });
         }
+
+        // Self-healing: there's no persistent worker on Vercel to retry a batch
+        // that's still 'processing' well past any realistic completion time
+        // (e.g. waitUntil itself hit maxDuration) — the next status poll is the
+        // only recovery point, so check and reap it here. Now runs only after
+        // authorization has passed (see M7 note above).
+        log = await reapIfStale(log);
 
         return res.status(200).json({ success: true, data: log });
     } catch (error) {
@@ -332,20 +359,20 @@ export const streamFailedRows = async (req, res) => {
         const firstError = errors.find(e => e.originalRow && typeof e.originalRow === 'object');
         if (firstError) {
             const originalHeaders = Object.keys(firstError.originalRow);
-            const csvHeader = [...originalHeaders, 'ERROR REASON'].map(h => `"${h.replace(/"/g, '""')}"`).join(',') + '\n';
+            const csvHeader = [...originalHeaders, 'ERROR REASON'].map(h => `"${sanitizeCsvValue(h).replace(/"/g, '""')}"`).join(',') + '\n';
             const csvRows = errors.map(e => {
                 const rowData = e.originalRow || {};
                 const values = originalHeaders.map(h => {
                     const val = rowData[h] === undefined || rowData[h] === null ? '' : rowData[h].toString();
-                    return `"${val.replace(/"/g, '""')}"`;
+                    return `"${sanitizeCsvValue(val).replace(/"/g, '""')}"`;
                 });
-                values.push(`"${(e.reason || '').replace(/"/g, '""')}"`);
+                values.push(`"${sanitizeCsvValue(e.reason || '').replace(/"/g, '""')}"`);
                 return values.join(',');
             }).join('\n');
             csvContent = csvHeader + csvRows + '\n';
         } else {
             const csvHeader = 'Row,Reason\n';
-            const csvRows = errors.map(e => `"${e.row}","${(e.reason || '').replace(/"/g, '""')}"`).join('\n');
+            const csvRows = errors.map(e => `"${sanitizeCsvValue(e.row).replace(/"/g, '""')}","${sanitizeCsvValue(e.reason || '').replace(/"/g, '""')}"`).join('\n');
             csvContent = csvHeader + csvRows + '\n';
         }
 

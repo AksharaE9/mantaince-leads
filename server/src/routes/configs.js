@@ -18,10 +18,10 @@ router.use(attachRole);
 
 // Custom Field Configuration endpoints
 router.get('/verticals/:verticalId/fields', getFieldConfigs);
-router.post('/verticals/:verticalId/fields', checkPermission('vertical:read'), createFieldConfig);
-router.patch('/verticals/:verticalId/fields/:fieldId', checkPermission('vertical:read'), updateFieldConfig);
-router.delete('/verticals/:verticalId/fields/:fieldId', checkPermission('vertical:read'), deleteFieldConfig);
-router.patch('/verticals/:verticalId/fields/reorder', checkPermission('vertical:read'), reorderFieldConfigs);
+router.post('/verticals/:verticalId/fields', checkPermission('vertical:update'), createFieldConfig);
+router.patch('/verticals/:verticalId/fields/:fieldId', checkPermission('vertical:update'), updateFieldConfig);
+router.delete('/verticals/:verticalId/fields/:fieldId', checkPermission('vertical:update'), deleteFieldConfig);
+router.patch('/verticals/:verticalId/fields/reorder', checkPermission('vertical:update'), reorderFieldConfigs);
 
 router.get('/verticals/:verticalId/fields/csv-template', getCsvTemplateFields);
 

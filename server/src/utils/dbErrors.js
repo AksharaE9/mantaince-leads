@@ -46,11 +46,16 @@ export const sendControllerError = (res, error, context = '') => {
     return res.status(400).json({ success: false, error: `Missing required field: ${error.column || 'unknown'}` });
   }
 
-  const response = { 
-    success: false, 
-    error: 'An internal server error occurred',
-    details: error.stack || error.message
+  // Full stack/message is logged server-side above (console.error)
+  // regardless of environment; only non-production responses include it in
+  // the JSON body sent to the client.
+  const response = {
+    success: false,
+    error: 'An internal server error occurred'
   };
+  if (process.env.NODE_ENV !== 'production') {
+    response.details = error.stack || error.message;
+  }
   return res.status(500).json(response);
 };
 

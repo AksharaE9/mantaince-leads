@@ -116,9 +116,9 @@ export const processRawDataJob = async (job) => {
         let existingPhones = [];
         if (uniquePhones.length > 0) {
             const existingRes = await query(
-                `SELECT phone_number FROM raw_data 
-                 WHERE vertical_id = $1 AND is_deleted = false 
-                   AND regexp_replace(phone_number, '[^\\d+]', '', 'g') = ANY($2)`,
+                `SELECT phone_number FROM raw_data
+                 WHERE vertical_id = $1 AND is_deleted = false
+                   AND phone_number = ANY($2)`,
                 [verticalId, uniquePhones]
             );
             existingPhones = existingRes.rows.map(r => r.phone_number.replace(/[^\d+]/g, ''));

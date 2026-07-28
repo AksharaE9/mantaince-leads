@@ -20,7 +20,7 @@ router.get('/cost-conversions/:id/escalations', authenticate, attachRole, checkP
 router.get('/admin/escalations/inbox', authenticate, attachRole, checkPermission('reports:read'), getAdminEscalationsInbox);
 
 // Escalation Actions
-router.put('/escalations/:id/resolve', authenticate, attachRole, checkPermission('reports:read'), resolveEscalation);
-router.put('/escalations/:id/reject', authenticate, attachRole, checkPermission('reports:read'), rejectEscalation);
+router.put('/escalations/:id/resolve', authenticate, attachRole, checkPermission('leads:update'), resolveEscalation);
+router.put('/escalations/:id/reject', authenticate, attachRole, checkPermission('leads:update'), rejectEscalation);
 
 export default router;

@@ -217,9 +217,9 @@ const processCsvJob = async (job) => {
         let existingPhones = [];
         if (uniqueCsvPhones.length > 0) {
             const existingRes = await query(
-                `SELECT phone FROM cost_conversions 
-                 WHERE vertical_id = $1 AND is_deleted = false 
-                   AND regexp_replace(phone, '[^\\d+]', '', 'g') = ANY($2)`,
+                `SELECT phone FROM cost_conversions
+                 WHERE vertical_id = $1 AND is_deleted = false
+                   AND phone = ANY($2)`,
                 [verticalId, uniqueCsvPhones]
             );
             existingPhones = existingRes.rows.map(l => sanitizePhone(l.phone));

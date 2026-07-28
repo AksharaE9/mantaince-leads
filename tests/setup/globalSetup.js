@@ -1,9 +1,17 @@
 import { execSync } from 'child_process';
 
-const TEST_DB_URL = process.env.TEST_DATABASE_URL
-  || 'postgresql://postgres:Akshara123@leadsbase-db.c56mq42qi4nb.eu-north-1.rds.amazonaws.com:5430/postgres';
+// No hardcoded fallback: the test DB connection must come from the
+// environment. Silently falling back to a baked-in credential is exactly
+// the kind of hardcoded-secret exposure this setup previously had.
+const TEST_DB_URL = process.env.TEST_DATABASE_URL;
 
 export async function setup() {
+  if (!TEST_DB_URL) {
+    throw new Error(
+      'TEST_DATABASE_URL env var is required to run integration tests. Refusing to start with no configured test database (no hardcoded fallback is provided).'
+    );
+  }
+
   process.env.DATABASE_URL = TEST_DB_URL;
 
   // Run migrations on test DB (in non-destructive deploy mode)

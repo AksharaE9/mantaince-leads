@@ -210,6 +210,23 @@ export const reorderFieldConfigs = async (req, res) => {
             return res.status(200).json({ success: true, data: { message: 'Field positions updated successfully' } });
         }
 
+        // Verify every submitted id actually belongs to this vertical before
+        // applying the reorder — otherwise a caller with reorder permission
+        // for their own vertical could smuggle in ids from another vertical.
+        const submittedIds = items.map((item) => item.id);
+        const ownedRes = await query(
+            'SELECT id FROM field_configs WHERE id = ANY($1) AND vertical_id = $2',
+            [submittedIds, verticalId]
+        );
+        const ownedIds = new Set(ownedRes.rows.map((r) => r.id));
+        const foreignIds = submittedIds.filter((id) => !ownedIds.has(id));
+        if (foreignIds.length > 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'One or more field configuration ids do not belong to this vertical'
+            });
+        }
+
         const params = [];
         const tuples = items.map((item) => {
             params.push(item.id, item.displayOrder);

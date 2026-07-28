@@ -99,7 +99,7 @@ export const inviteUser = async (req, res) => {
     const newUserRes = await query(`
       INSERT INTO users (id, name, email, password_hash, role_id, vertical_access, is_approved, created_by, invite_token, invite_token_expiry)
       VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9)
-      RETURNING *
+      RETURNING id, name, email, role_id, vertical_access, is_active, is_approved, last_login_at, created_by, created_at, updated_at
     `, [
       userId, name, email.toLowerCase(), passwordHash, roleDoc.id, verticalAccess, req.user.sub, inviteToken, inviteTokenExpiry
     ]);
@@ -204,12 +204,15 @@ export const updateUser = async (req, res) => {
     }
 
     if (setClause.length === 0) {
-      return res.status(200).json({ success: true, data: user });
+      // No fields to change — still must not leak password_hash/invite_token
+      // by returning the raw `SELECT *` row directly to the client.
+      const { password_hash, invite_token, invite_token_expiry, ...safeUser } = user;
+      return res.status(200).json({ success: true, data: safeUser });
     }
 
     const updateRes = await query(`
-      UPDATE users SET ${setClause.join(', ')}, updated_at = NOW() 
-      WHERE id = $1 RETURNING *
+      UPDATE users SET ${setClause.join(', ')}, updated_at = NOW()
+      WHERE id = $1 RETURNING id, name, email, role_id, vertical_access, is_active, is_approved, last_login_at, created_by, created_at, updated_at
     `, params);
     const updatedUser = updateRes.rows[0];
 
@@ -238,10 +241,22 @@ export const changeUserRole = async (req, res) => {
   const { id } = req.params;
   const { role, adminPassword } = req.body;
   try {
+    // Self-escalation guard: an admin must not be able to change their own
+    // role (e.g. to grant themselves broader access, or to accidentally
+    // strip their own super_admin access).
+    if (id === req.user.sub) {
+      return res.status(403).json({ success: false, error: 'You cannot change your own role' });
+    }
+
     // Parallelize: admin password check + user/role fetches simultaneously
     const [adminRes, userRes, roleRes] = await Promise.all([
         query('SELECT password_hash FROM users WHERE id = $1', [req.user.sub]),
-        query('SELECT * FROM users WHERE id = $1', [id]),
+        query(`
+          SELECT u.*, r.name AS current_role_name
+          FROM users u
+          JOIN roles r ON u.role_id = r.id
+          WHERE u.id = $1
+        `, [id]),
         query('SELECT id FROM roles WHERE name = $1', [role]),
     ]);
 
@@ -261,10 +276,25 @@ export const changeUserRole = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Target role not found' });
     }
 
+    // Last-super-admin protection: refuse to move the last active
+    // super_admin out of that role, which would lock the org out of
+    // super-admin-only functionality.
+    if (user.current_role_name === 'super_admin' && role !== 'super_admin') {
+      const countRes = await query(`
+        SELECT COUNT(*) FROM users u
+        JOIN roles r ON u.role_id = r.id
+        WHERE r.name = 'super_admin' AND u.is_active = true
+      `);
+      const superAdminCount = parseInt(countRes.rows[0].count, 10);
+      if (superAdminCount <= 1) {
+        return res.status(400).json({ success: false, error: 'Cannot change role: at least one super_admin must remain' });
+      }
+    }
+
     const before = { ...user };
     const updatedRes = await query(`
-      UPDATE users SET role_id = $1, updated_at = NOW() 
-      WHERE id = $2 RETURNING *
+      UPDATE users SET role_id = $1, updated_at = NOW()
+      WHERE id = $2 RETURNING id, name, email, role_id, vertical_access, is_active, is_approved, last_login_at, created_by, created_at, updated_at
     `, [roleDoc.id, id]);
     const updatedUser = updatedRes.rows[0];
 
@@ -300,8 +330,8 @@ export const assignUserVerticals = async (req, res) => {
 
     const before = userRes.rows[0];
     const updatedRes = await query(`
-      UPDATE users SET vertical_access = $1, updated_at = NOW() 
-      WHERE id = $2 RETURNING *
+      UPDATE users SET vertical_access = $1, updated_at = NOW()
+      WHERE id = $2 RETURNING id, name, email, role_id, vertical_access, is_active, is_approved, last_login_at, created_by, created_at, updated_at
     `, [verticalAccess, id]);
     const updatedUser = updatedRes.rows[0];
 
@@ -434,8 +464,8 @@ export const approveUser = async (req, res) => {
     }
 
     const updatedRes = await query(`
-      UPDATE users SET is_approved = true, updated_at = NOW() 
-      WHERE id = $1 RETURNING *
+      UPDATE users SET is_approved = true, updated_at = NOW()
+      WHERE id = $1 RETURNING id, name, email, role_id, vertical_access, is_active, is_approved, last_login_at, created_by, created_at, updated_at
     `, [id]);
     const updatedUser = updatedRes.rows[0];
 

@@ -20,9 +20,6 @@ export const attachRole = async (req, res, next) => {
   try {
     let cached = await cacheGet(cacheKey);
 
-    const vertsRes = await query('SELECT id FROM verticals');
-    const allVerticalIds = vertsRes.rows.map(v => String(v.id));
-
     if (cached) {
       if (!cached.userDoc.is_active) {
         return res.status(403).json({
@@ -34,19 +31,22 @@ export const attachRole = async (req, res, next) => {
         name: cached.userDoc.role_name,
         permissions: cached.userDoc.permissions
       };
-      req.user.verticalAccess = allVerticalIds;
+      req.user.verticalAccess = cached.combinedAccess || [];
       req.user.assignedSubVerticals = cached.assignedSubVerticals || [];
       req.user.role = cached.userDoc.role_name;
       return next();
     }
 
+    const vertsRes = await query('SELECT id FROM verticals');
+    const allVerticalIds = vertsRes.rows.map(v => String(v.id));
+
     const userRes = await query(`
       SELECT u.*, r.name as role_name, r.permissions
-      FROM users u 
-      JOIN roles r ON u.role_id = r.id 
+      FROM users u
+      JOIN roles r ON u.role_id = r.id
       WHERE u.id = $1
     `, [userId]);
-    
+
     const userDoc = userRes.rows[0];
 
     if (!userDoc) {

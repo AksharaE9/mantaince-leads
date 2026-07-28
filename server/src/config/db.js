@@ -1,8 +1,5 @@
 import pg from 'pg';
 import AWS from 'aws-sdk';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import {
     PGHOST,
     PGPORT,
@@ -12,10 +9,6 @@ import {
     USE_RDS_IAM,
     AWS_REGION
 } from './env.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const caBundlePath = path.normalize(path.resolve(__dirname, '../../../global-bundle.pem'));
 
 const { Pool } = pg;
 
@@ -50,13 +43,25 @@ const pool = new Pool({
     user:     PGUSER || 'postgres',
     database: PGDATABASE || 'postgres',
     password: getAuthToken,          // Dynamic resolver — fetches IAM token on demand
+    // No custom `ca` here: Neon (the live DB per CLAUDE.md) presents a
+    // publicly-trusted certificate, and passing an explicit `ca` to Node's
+    // TLS options REPLACES the default trusted-CA list rather than adding
+    // to it — supplying the old RDS bundle here made Node reject Neon's
+    // valid cert with "unable to get local issuer certificate" (verified
+    // by booting the server locally after enabling rejectUnauthorized).
+    // Omitting `ca` lets Node fall back to its default CA store, which
+    // correctly trusts Neon's certificate.
     ssl: {
-        rejectUnauthorized: false,
-        ca: fs.existsSync(caBundlePath) ? fs.readFileSync(caBundlePath).toString() : undefined
+        rejectUnauthorized: true
     },
-    // Performance-tuned pool settings (150 concurrent users @ 3 parallel queries each)
-    max:                     50,     // Up from 25 — Aurora handles 80+ connections on db.r6g.large
-    min:                      5,     // Keep warm connections ready at all times
+    // Pool settings for Vercel's fan-out serverless model: each concurrent
+    // instance gets its own independent pool, and Neon's `-pooler` endpoint
+    // (PgBouncer) is already doing the real cross-instance multiplexing —
+    // this pool only needs to serve one instance's own limited concurrency.
+    max:                     5,      // Small per-instance cap; upstream pooler handles fan-out
+    min:                      5,     // NOTE: pg-pool's `min` does not eagerly open connections at
+                                      // startup — it only prevents pruning below this count once
+                                      // connections have been opened by activity.
     idleTimeoutMillis:      20_000,  // Reclaim idle connections faster (20 s)
     connectionTimeoutMillis: 5_000,
     allowExitOnIdle:        false,
