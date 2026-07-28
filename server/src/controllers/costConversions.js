@@ -327,10 +327,15 @@ export const createCostConversion = async (req, res) => {
         }
         data.employeeName = targetEmployeeName || data.employeeName || '';
 
+        // Duplicate check is scoped to lead_type: COS (CALL/FIELD) and
+        // Positives (POSITIVE) share this table but are treated as
+        // independent sections for duplicate purposes — the same phone
+        // number legitimately exists once as a COS lead and once as a
+        // Positive without either blocking the other.
         leadRes = await query(`
             WITH dedup AS (
                 SELECT id FROM cost_conversions
-                WHERE phone = $1 AND vertical_id = $2 AND is_deleted = false
+                WHERE phone = $1 AND vertical_id = $2 AND is_deleted = false AND lead_type = $10
                 LIMIT 1
             )
             INSERT INTO cost_conversions

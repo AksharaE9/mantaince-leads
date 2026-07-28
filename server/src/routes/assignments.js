@@ -1,5 +1,5 @@
 import express from 'express';
-import { streamAssignments, bulkAssign, getMySubVerticals, getStreamTicket } from '../controllers/assignments.js';
+import { streamAssignments, bulkAssign, getMySubVerticals, getStreamTicket, updateStreamVertical } from '../controllers/assignments.js';
 import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
 import checkPermission from '../middleware/checkPermission.js';
@@ -14,6 +14,10 @@ router.post('/stream/ticket', getStreamTicket);
 
 // SSE Stream
 router.get('/stream', streamAssignments);
+
+// Report which vertical this client is currently viewing, for server-side
+// broadcast scoping (see updateClientVertical in assignmentBroadcaster.js)
+router.post('/stream/vertical', updateStreamVertical);
 
 // User's own assignments
 router.get('/me', getMySubVerticals);

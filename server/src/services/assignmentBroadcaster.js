@@ -13,14 +13,37 @@ const clients = new Map(); // Map<userId: string, Set<Response>>
 let listenerClient = null;
 
 /**
- * Register a client's SSE response object
+ * Register a client's SSE response object. `verticalId`, if known at connect
+ * time, is stamped directly on the response object (Node's ServerResponse
+ * accepts arbitrary properties) so vertical-scoped broadcasts below can skip
+ * writing to connections that aren't viewing the affected vertical — this is
+ * a bandwidth/efficiency optimization only, never the source of correctness:
+ * the client independently re-checks its own active vertical before acting
+ * on anything it receives (see useRealtimeAssignments.js), so a connection
+ * with a stale or unknown tracked vertical here can only cause a redundant
+ * message, never a missed or wrongly-applied one.
  */
-export const addClient = (userId, res) => {
+export const addClient = (userId, res, verticalId = null) => {
+  res.currentVerticalId = verticalId;
   if (!clients.has(userId)) {
     clients.set(userId, new Set());
   }
   clients.get(userId).add(res);
   console.log(`[SSE] Client added for user ${userId}. Total users: ${clients.size}`);
+};
+
+/**
+ * Update the tracked "currently viewing" vertical for every open connection
+ * belonging to a user (called whenever the client's activeVertical changes,
+ * without needing to reconnect the SSE stream). If a user has multiple tabs
+ * open on different verticals, this coarsely applies to all of them — safe
+ * because of the client-side backstop described above, just not maximally
+ * precise for that rare multi-tab case.
+ */
+export const updateClientVertical = (userId, verticalId) => {
+  const userClients = clients.get(userId);
+  if (!userClients) return;
+  for (const res of userClients) res.currentVerticalId = verticalId;
 };
 
 /**
@@ -108,9 +131,20 @@ export const initRealtimeListener = async () => {
             });
           }
         } else {
-          // Broadcast to all
+          // Broadcast to all — but if this payload is vertical-scoped (data
+          // mutations from costConversions/csv/rawData/deliveryData/followUps
+          // all carry a verticalId), skip connections we know are viewing a
+          // *different* vertical. Connections with no tracked vertical yet
+          // (res.currentVerticalId is null/undefined, e.g. right after
+          // connecting before their first vertical report arrives) still
+          // receive it — fail-open, never fail-closed, so this can only ever
+          // waste a little bandwidth, never silently drop a real update.
+          const scopeVerticalId = payload.verticalId || null;
           for (const [userId, resSet] of clients.entries()) {
             for (const res of resSet) {
+              if (scopeVerticalId && res.currentVerticalId && res.currentVerticalId !== scopeVerticalId) {
+                continue;
+              }
               try {
                 res.write(sseData);
               } catch (err) {
@@ -177,6 +211,7 @@ export const broadcastToAll = async (payload) => {
 export default {
   addClient,
   removeClient,
+  updateClientVertical,
   broadcast,
   closeAllClients,
   broadcastToAll,

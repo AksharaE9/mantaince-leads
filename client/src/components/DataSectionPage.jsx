@@ -47,7 +47,7 @@ export default function DataSectionPage({ config }) {
 
   const navigate = useNavigate();
   const location = useLocation();
-  const { activeVertical, setActiveVertical } = useUiStore();
+  const { activeVertical, setActiveVertical, leadsRefreshTrigger } = useUiStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [verticals, setVerticals] = useState([]);
@@ -132,6 +132,12 @@ export default function DataSectionPage({ config }) {
   }, [activeVertical, page, limit, search, sortBy, sortDir, dateFrom, dateTo, businessType, city, assignedUserId, endpoints.list, title]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
+
+  // Real-time sync: a scoped, debounced SSE signal (see useRealtimeAssignments.js)
+  // bumps this same trigger LeadsPage/FollowUpsPositivesPage already use —
+  // this page previously didn't react to it at all, so other users' bulk
+  // uploads/edits here only appeared on manual refresh.
+  useEffect(() => { if (leadsRefreshTrigger > 0) fetchRecords(); }, [leadsRefreshTrigger]);
 
   // Debounced search box -> URL, same 400ms convention as LeadsPage.jsx.
   useEffect(() => {

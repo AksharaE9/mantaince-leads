@@ -216,11 +216,15 @@ const processCsvJob = async (job) => {
         const uniqueCsvPhones = [...new Set(csvPhones)];
         let existingPhones = [];
         if (uniqueCsvPhones.length > 0) {
+            // Scoped by lead_type: COS and Positives share this table but are
+            // independent sections for duplicate purposes (see costConversions.js's
+            // createCostConversion for the single-add equivalent of this same fix).
             const existingRes = await query(
                 `SELECT phone FROM cost_conversions
                  WHERE vertical_id = $1 AND is_deleted = false
+                   AND lead_type = $3
                    AND phone = ANY($2)`,
-                [verticalId, uniqueCsvPhones]
+                [verticalId, uniqueCsvPhones, leadType]
             );
             existingPhones = existingRes.rows.map(l => sanitizePhone(l.phone));
         }
