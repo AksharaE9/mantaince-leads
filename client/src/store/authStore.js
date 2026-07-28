@@ -16,6 +16,9 @@ const getInitialUser = () => {
 export const useAuthStore = create((set, get) => ({
   user: getInitialUser(),
   accessToken: null,
+  // Refresh token stored in memory only (NOT localStorage) as fallback for
+  // environments where HttpOnly cookies are not sent (e.g. Vercel serverless)
+  refreshTokenMemory: null,
   isAuthenticated: !!getInitialUser(),
   isInitializing: true,
   loading: false,
@@ -26,7 +29,7 @@ export const useAuthStore = create((set, get) => ({
         await get().refreshToken();
       } catch {
         localStorage.removeItem('user');
-        set({ user: null, accessToken: null, isAuthenticated: false });
+        set({ user: null, accessToken: null, isAuthenticated: false, refreshTokenMemory: null });
       }
     }
     set({ isInitializing: false });
@@ -36,12 +39,13 @@ export const useAuthStore = create((set, get) => ({
     set({ loading: true });
     try {
       const response = await axios.post('/api/v1/auth/login', { email, password });
-      const { accessToken, user } = response.data.data;
+      const { accessToken, refreshToken: newRefreshToken, user } = response.data.data;
 
       localStorage.setItem('user', JSON.stringify(user));
       set({
         user,
         accessToken,
+        refreshTokenMemory: newRefreshToken || null,
         isAuthenticated: true,
         loading: false
       });
@@ -62,6 +66,7 @@ export const useAuthStore = create((set, get) => ({
       set({
         user: null,
         accessToken: null,
+        refreshTokenMemory: null,
         isAuthenticated: false
       });
     }
@@ -74,12 +79,17 @@ export const useAuthStore = create((set, get) => ({
 
     refreshPromise = (async () => {
       try {
-        const response = await axios.post('/api/v1/auth/refresh');
-        const { accessToken, user } = response.data.data;
+        const currentRefreshToken = get().refreshTokenMemory;
+        // Send refresh token in body as fallback when cookie is not forwarded
+        const response = await axios.post('/api/v1/auth/refresh', 
+          currentRefreshToken ? { refreshToken: currentRefreshToken } : {}
+        );
+        const { accessToken, refreshToken: newRefreshToken, user } = response.data.data;
         localStorage.setItem('user', JSON.stringify(user));
         set({
           user,
           accessToken,
+          refreshTokenMemory: newRefreshToken || null,
           isAuthenticated: true
         });
         return accessToken;
@@ -88,6 +98,7 @@ export const useAuthStore = create((set, get) => ({
         set({
           user: null,
           accessToken: null,
+          refreshTokenMemory: null,
           isAuthenticated: false
         });
         throw error;

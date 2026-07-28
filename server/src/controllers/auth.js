@@ -107,6 +107,9 @@ export const login = async (req, res) => {
       success: true,
       data: {
         accessToken,
+        // Also return refresh token in body — client stores it in memory as a fallback
+        // for environments where the HttpOnly cookie is not forwarded (e.g. Vercel serverless)
+        refreshToken,
         user: {
           id: user.id,
           name: user.name,
@@ -126,7 +129,9 @@ export const login = async (req, res) => {
  * Implements token rotation
  */
 export const refresh = async (req, res) => {
-  const token = req.cookies.refreshToken;
+  // Accept token from HttpOnly cookie (primary) OR from request body (fallback for
+  // environments where SameSite=None cookies are blocked, e.g. some Vercel deployments)
+  const token = req.cookies.refreshToken || req.body?.refreshToken;
   if (!token) {
     return res.status(401).json({ success: false, error: 'Refresh token missing' });
   }
@@ -184,6 +189,9 @@ export const refresh = async (req, res) => {
       success: true,
       data: {
         accessToken,
+        // Also return the new refresh token in body so the client can store it
+        // in memory as a fallback when cookies are not forwarded (e.g. serverless)
+        refreshToken: newRefreshToken,
         user: {
           id: user.id,
           name: user.name,
