@@ -30,6 +30,12 @@ export const getVerticals = async (req, res) => {
             return vertRes.rows;
         });
 
+        if (req.user.role !== 'super_admin') {
+            const allowedIds = req.user.verticalAccess || [];
+            const filtered = verticals.filter(v => allowedIds.includes(String(v.id)));
+            return res.status(200).json({ success: true, data: filtered });
+        }
+
         return res.status(200).json({ success: true, data: verticals });
     } catch (error) {
         return res.status(500).json({ success: false, error: error.message });

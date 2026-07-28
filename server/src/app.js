@@ -250,22 +250,6 @@ app.use('/uploads', express.static(path.join(__dirname, '../../uploads'), {
   lastModified: true
 }));
 
-app.get('/api/v1/diagnose-db', async (req, res) => {
-  try {
-    const usersRes = await pool.query('SELECT u.name, u.email, u.vertical_access, r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id');
-    const vertsRes = await pool.query('SELECT id, name FROM verticals');
-    res.status(200).json({
-      success: true,
-      host: process.env.PGHOST,
-      database: process.env.PGDATABASE,
-      users: usersRes.rows,
-      verticals: vertsRes.rows
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 // Lightweight status checkpoint endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ 
