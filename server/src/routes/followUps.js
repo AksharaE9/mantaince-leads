@@ -7,7 +7,8 @@ import {
   getFollowUpSummary,
   getCalendarGrid,
   getCalendarFollowUpsByDate,
-  getFollowUpVerticalStats
+  getFollowUpVerticalStats,
+  promoteCosLeadsToFollowUps
 } from '../controllers/followUps.js';
 import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
@@ -27,6 +28,13 @@ router.get('/cost-conversions/:costConversionId/follow-ups/summary', checkPermis
 router.get('/leads/:costConversionId/follow-ups', checkPermission(['leads:read', 'leads:read_own']), getFollowUps);
 router.post('/leads/:costConversionId/follow-ups', checkPermission(['leads:update', 'leads:update_own']), createFollowUp);
 router.get('/leads/:costConversionId/follow-ups/summary', checkPermission(['leads:read', 'leads:read_own']), getFollowUpSummary);
+
+// Bulk "Promote to Follow-ups" (COS -> linked follow_ups rows). Full-tier
+// permission only (not leads:update_own) — this is a scope-based bulk
+// operation (verticalId/agentId/costConversionIds), and an update_own-scoped
+// user could otherwise pass a different agentId to bypass their "own"
+// restriction, same reasoning as scanCosDuplicates' permission choice.
+router.post('/promote-to-follow-ups', checkPermission('leads:update'), promoteCosLeadsToFollowUps);
 
 // Actions on single follow-up
 router.put('/follow-ups/:id', checkPermission(['leads:update', 'leads:update_own']), updateFollowUp);

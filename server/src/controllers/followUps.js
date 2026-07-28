@@ -548,3 +548,134 @@ export const getFollowUpVerticalStats = async (req, res) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 };
+
+/**
+ * POST /api/v1/followUps/promote-to-follow-ups
+ *
+ * Bulk "Promote to Follow-ups": for each matching COS record, creates a
+ * linked follow_ups row (cost_conversion_id references the source lead —
+ * this is a genuinely separate table/entity, not a mutation of the COS
+ * row itself, and is distinct from the duplicate-flagging in
+ * scanCosDuplicates, a different operation entirely).
+ *
+ * Required follow_ups fields, for a record being promoted automatically
+ * rather than scheduled by a human one at a time:
+ *   - assigned_to_id: carried over from the source lead's own assigned_to;
+ *     falls back to the promoting user if the lead has no assignee.
+ *   - follow_up_date: today.
+ *   - description: an auto-generated, clearly system-labeled note
+ *     referencing the source lead's business name.
+ *
+ * Idempotent: a COS record that already has a linked follow_ups row is
+ * skipped and reported, never double-created. Records flagged
+ * duplicate_status='duplicate_removed' (see scanCosDuplicates) are
+ * automatically excluded — dedupe first, promote second.
+ *
+ * `dryRun` (default true) previews counts with zero writes.
+ */
+export const promoteCosLeadsToFollowUps = async (req, res) => {
+  const { verticalId, agentId, costConversionIds, dryRun = true } = req.body;
+  try {
+    if (!isValidUUID(verticalId)) {
+      return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+    }
+    if (agentId && !isValidUUID(agentId)) {
+      return res.status(400).json({ success: false, error: 'agentId must be a valid UUID if provided' });
+    }
+    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+    }
+
+    const scopeWheres = ['c.vertical_id = $1', 'c.is_deleted = false', "c.lead_type != 'POSITIVE'"];
+    const scopeParams = [verticalId];
+    let pIdx = 2;
+    if (agentId) {
+      scopeWheres.push(`(c.uploaded_by = $${pIdx} OR c.assigned_to = $${pIdx})`);
+      scopeParams.push(agentId);
+      pIdx++;
+    }
+    if (Array.isArray(costConversionIds) && costConversionIds.length > 0) {
+      scopeWheres.push(`c.id = ANY($${pIdx}::uuid[])`);
+      scopeParams.push(costConversionIds);
+      pIdx++;
+    }
+
+    // Count duplicate-flagged records in scope separately so the response
+    // can report skippedDuplicate explicitly, even though they're excluded
+    // from the candidate query below.
+    const dupCountRes = await query(
+      `SELECT COUNT(*) FROM cost_conversions c WHERE ${scopeWheres.join(' AND ')} AND c.duplicate_status = 'duplicate_removed'`,
+      scopeParams
+    );
+    const skippedDuplicate = parseInt(dupCountRes.rows[0].count, 10);
+
+    const candidatesRes = await query(`
+      SELECT c.id, c.business_name, c.assigned_to, c.sub_vertical_id,
+             EXISTS(SELECT 1 FROM follow_ups f WHERE f.cost_conversion_id = c.id) AS already_promoted
+      FROM cost_conversions c
+      WHERE ${scopeWheres.join(' AND ')} AND (c.duplicate_status IS NULL OR c.duplicate_status != 'duplicate_removed')
+    `, scopeParams);
+
+    const toPromote = [];
+    let alreadyPromoted = 0;
+    let skippedNoSubVertical = 0;
+    for (const row of candidatesRes.rows) {
+      if (row.already_promoted) { alreadyPromoted++; continue; }
+      if (!row.sub_vertical_id) { skippedNoSubVertical++; continue; }
+      toPromote.push(row);
+    }
+
+    if (dryRun) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          dryRun: true,
+          wouldPromote: toPromote.length,
+          alreadyPromoted, skippedDuplicate, skippedNoSubVertical,
+        },
+      });
+    }
+
+    let promoted = 0;
+    let failed = 0;
+    const errors = [];
+    const today = new Date().toISOString().slice(0, 10);
+    const promotedIds = [];
+
+    for (const row of toPromote) {
+      try {
+        const id = crypto.randomUUID();
+        const assignedToId = row.assigned_to || req.user.sub;
+        const description = `[System-generated] Promoted from COS lead "${row.business_name || 'Unnamed lead'}" via bulk promotion.`;
+        await query(`
+          INSERT INTO follow_ups (id, cost_conversion_id, sub_vertical_id, assigned_to_id, created_by_id, follow_up_date, description, status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+        `, [id, row.id, row.sub_vertical_id, assignedToId, req.user.sub, today, description]);
+        promoted++;
+        promotedIds.push(row.id);
+      } catch (err) {
+        failed++;
+        errors.push({ costConversionId: row.id, reason: err.message });
+      }
+    }
+
+    if (promoted > 0) {
+      await logAudit(req, {
+        action: 'follow_up.bulk_promoted',
+        targetCollection: 'follow_ups',
+        targetId: verticalId,
+        after: { promoted, costConversionIds: promotedIds },
+        metadata: { agentId: agentId || null },
+      });
+      await cacheDeletePattern('calendar:*');
+      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'bulk_promote' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { dryRun: false, promoted, alreadyPromoted, skippedDuplicate, skippedNoSubVertical, failed, errors },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
