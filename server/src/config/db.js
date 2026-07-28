@@ -532,7 +532,7 @@ const runMigrations = async () => {
         -- provides an audit trail back to the created follow_up row without
         -- requiring a follow_ups table lookup in every list query.
         ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMP;
-        ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS promoted_to_follow_up_id UUID REFERENCES follow_ups(id) ON DELETE SET NULL;
+        ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS promoted_to_follow_up_id VARCHAR(50) REFERENCES follow_ups(id) ON DELETE SET NULL;
         ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS promoted_by UUID REFERENCES users(id) ON DELETE SET NULL;
 
         -- Migrate user_assignments from vertical_id to sub_vertical_id if vertical_id column exists
