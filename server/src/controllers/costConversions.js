@@ -652,6 +652,14 @@ export const updateCostConversion = async (req, res) => {
         );
         const updatedLead = updatedRes.rows[0];
 
+        // Also update linked follow_ups assigned operator to sync changes in real-time
+        if (updatedLead.assigned_to && isValidUUID(updatedLead.assigned_to)) {
+            await query(
+                'UPDATE follow_ups SET assigned_to_id = $1, updated_at = NOW() WHERE cost_conversion_id = $2',
+                [updatedLead.assigned_to, id]
+            );
+        }
+
         await invalidateOnLeadChange(lead.vertical_id, id);
         logAudit(req, { action: 'cost_conversion.update', targetCollection: 'cost_conversions', targetId: id, after: updatedLead });
         broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId: lead.vertical_id, action: 'update', leadId: id });
@@ -764,6 +772,14 @@ export const assignCostConversion = async (req, res) => {
             'UPDATE cost_conversions SET assigned_to = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
             [userId || null, id]
         );
+
+        // Also update linked follow_ups assigned operator to sync changes in real-time
+        if (userId && isValidUUID(userId)) {
+            await query(
+                'UPDATE follow_ups SET assigned_to_id = $1, updated_at = NOW() WHERE cost_conversion_id = $2',
+                [userId, id]
+            );
+        }
 
         await invalidateOnLeadChange(lead.vertical_id, id);
         logAudit(req, { action: 'cost_conversion.assign', targetCollection: 'cost_conversions', targetId: id, after: { assignedTo: userId } });

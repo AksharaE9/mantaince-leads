@@ -27,14 +27,15 @@ const UNSCOPED_REFRESH_TYPES = new Set([
 // Coalesce a poll cycle's events into a single refetch instead of one per
 // event. Bulk uploads already emit a single event at batch completion
 // server-side, so this mainly guards the many-small-edits case.
-const REFRESH_DEBOUNCE_MS = 800;
+const REFRESH_DEBOUNCE_MS = 200;
 
 // SSE never actually delivered data on Vercel (the legacy builds/routes
 // @vercel/node config buffers the whole function response instead of
 // streaming it — confirmed empirically, see assignmentBroadcaster.js).
 // Polling is the replacement transport: cheap, robust on any Vercel plan,
 // and well within budget at the ~50-concurrent-user target.
-const POLL_INTERVAL_MS = 4000;
+// Reduced to 1500ms (1.5s) to guarantee real-time sync responsiveness.
+const POLL_INTERVAL_MS = 1500;
 
 export function useRealtimeAssignments() {
   const { user, accessToken } = useAuthStore();
