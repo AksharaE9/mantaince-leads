@@ -498,7 +498,7 @@ export const updateCostConversion = async (req, res) => {
         return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
     }
     try {
-        const leadRes = await query('SELECT id, vertical_id, is_deleted, assigned_to FROM cost_conversions WHERE id = $1', [id]);
+        const leadRes = await query('SELECT id, vertical_id, is_deleted, assigned_to, lead_type FROM cost_conversions WHERE id = $1', [id]);
         const lead    = leadRes.rows[0];
         if (!lead || lead.is_deleted) {
             return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
@@ -522,12 +522,13 @@ export const updateCostConversion = async (req, res) => {
             if (!sanitizedPhone) {
                 return res.status(400).json({ success: false, error: 'Contact number is mandatory' });
             }
-            // Check for duplicates
+            // Check for duplicates — scoped to this lead's own lead_type so COS
+            // and Positives (which share this table) never cross-flag each other.
             const existing = await query(
-                `SELECT id FROM cost_conversions 
-                WHERE phone = $1 AND vertical_id = $2 AND id <> $3 AND is_deleted = false
+                `SELECT id FROM cost_conversions
+                WHERE phone = $1 AND vertical_id = $2 AND id <> $3 AND is_deleted = false AND lead_type = $4
                 LIMIT 1`,
-                [sanitizedPhone, lead.vertical_id, id]
+                [sanitizedPhone, lead.vertical_id, id, lead.lead_type]
             );
             if (existing.rowCount > 0) {
                 return res.status(409).json({ success: false, error: 'Another lead with this phone number already exists' });

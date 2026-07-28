@@ -7,7 +7,6 @@ import { PORT, CLIENT_URL } from './config/env.js';
 import pool, { connectDB } from './config/db.js';
 import performanceMonitor from './middleware/performance.js';
 import { timingMiddleware } from './middleware/timing.js';
-import { closeAllClients, initRealtimeListener } from './services/assignmentBroadcaster.js';
 
 // Route imports
 import authRouter from './routes/auth.js';
@@ -61,13 +60,7 @@ app.use((req, res, next) => {
 console.log('✓ Compression: gzip active (threshold 1KB)');
 
 // 2. Establish DB Connections
-connectDB().then(() => {
-  if (process.env.NODE_ENV !== 'test') {
-    initRealtimeListener().catch(err => {
-      console.error('❌ Failed to initialize Realtime Listener:', err.message);
-    });
-  }
-});
+connectDB();
 
 // 3. Register Security & Parsing Middlewares
 app.use(helmet({
@@ -431,10 +424,7 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   const shutdown = async (signal) => {
     console.log(`🛑 ${signal} received — shutting down gracefully...`);
 
-    // 1. Close all SSE clients immediately to release handles
-    try { closeAllClients(); } catch (_) {}
-
-    // 2. Close HTTP server — stop accepting new connections
+    // 1. Close HTTP server — stop accepting new connections
     if (server) {
       server.close(() => console.log('HTTP server closed.'));
     }

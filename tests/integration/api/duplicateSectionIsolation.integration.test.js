@@ -171,4 +171,41 @@ describe('Duplicate detection: strict per-section isolation', () => {
         expect(positiveFinal.successCount).toBe(1);
         expect(positiveFinal.duplicateCount || 0).toBe(0);
     }, 30000);
+
+    // Covers the updateCostConversion gap: this path checked phone
+    // uniqueness without a lead_type filter, so editing a lead's phone to
+    // match a same-phone row in the *other* lead_type incorrectly 409'd.
+    it('editing a COS lead\'s phone to match a Positive\'s phone (different section) succeeds', async () => {
+        const cosPhone = '9800000006';
+        const positivePhone = '9800000007';
+
+        const cosRes = await createLead({ phone: cosPhone, leadType: 'CALL' });
+        expect(cosRes.status).toBe(201);
+        const cosId = cosRes.body.data.id;
+
+        const positiveRes = await createLead({ phone: positivePhone, leadType: 'POSITIVE' });
+        expect(positiveRes.status).toBe(201);
+
+        const updateRes = await request(app)
+            .patch(`/api/v1/leads/${cosId}`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ phone: positivePhone });
+        expect(updateRes.status).toBe(200);
+    });
+
+    it('editing a COS lead\'s phone to match another COS lead\'s phone (same section) is rejected', async () => {
+        const phoneA = '9800000008';
+        const phoneB = '9800000009';
+
+        const leadA = await createLead({ phone: phoneA, leadType: 'CALL' });
+        expect(leadA.status).toBe(201);
+        const leadB = await createLead({ phone: phoneB, leadType: 'CALL' });
+        expect(leadB.status).toBe(201);
+
+        const updateRes = await request(app)
+            .patch(`/api/v1/leads/${leadB.body.data.id}`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({ phone: phoneA });
+        expect(updateRes.status).toBe(409);
+    });
 });

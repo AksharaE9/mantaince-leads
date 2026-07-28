@@ -134,6 +134,9 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'cost_conversions' AND column_name = 'duplicate_status'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'realtime_events'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -602,6 +605,20 @@ const runMigrations = async () => {
         CREATE INDEX IF NOT EXISTS idx_delivery_data_vertical ON delivery_data(vertical_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_delivery_data_phone ON delivery_data(vertical_id, phone_number);
         CREATE INDEX IF NOT EXISTS idx_delivery_data_linked_raw_data ON delivery_data(linked_raw_data_id);
+
+        -- Real-time sync change log, polled by clients (replaces SSE — Vercel's
+        -- legacy builds/routes @vercel/node config never actually streams
+        -- responses, so broadcastToAll() writes here instead of pg_notify, and
+        -- clients poll GET /assignments/poll?sinceId=... for anything new.
+        -- Low-volume by design: one row per completed operation/batch, not
+        -- per-row, same as the old broadcast call sites already did.
+        CREATE TABLE IF NOT EXISTS realtime_events (
+            id BIGSERIAL PRIMARY KEY,
+            type VARCHAR(50) NOT NULL,
+            vertical_id UUID,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_realtime_events_id ON realtime_events(id);
     `;
 
     // ── Phase 2: Performance Indexes ─────────────────────────────────────────

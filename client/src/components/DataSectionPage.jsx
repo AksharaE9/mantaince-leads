@@ -133,7 +133,7 @@ export default function DataSectionPage({ config }) {
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
 
-  // Real-time sync: a scoped, debounced SSE signal (see useRealtimeAssignments.js)
+  // Real-time sync: a scoped, debounced poll signal (see useRealtimeAssignments.js)
   // bumps this same trigger LeadsPage/FollowUpsPositivesPage already use —
   // this page previously didn't react to it at all, so other users' bulk
   // uploads/edits here only appeared on manual refresh.

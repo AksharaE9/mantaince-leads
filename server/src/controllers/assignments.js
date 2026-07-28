@@ -1,46 +1,63 @@
 import { query } from '../config/db.js';
-import crypto from 'crypto';
-import { broadcast, addClient, removeClient, updateClientVertical } from '../services/assignmentBroadcaster.js';
-import { logAudit } from '../services/audit.js';
-import { bulkInsert } from '../db/bulkInsert.js';
-import { cacheDelete } from '../services/cache.js';
-import { signSseTicket } from '../utils/token.js';
 
 /**
- * SSE Stream Endpoint
+ * GET /assignments/poll
+ *
+ * Polling replacement for the old SSE stream (see assignmentBroadcaster.js
+ * for why). Returns any realtime_events rows newer than `sinceId`, plus the
+ * current max id as the client's next cursor. On the client's very first
+ * call (no sinceId), returns no events — just the baseline cursor — so
+ * connecting doesn't retroactively trigger a refresh for history that
+ * predates the page load.
  */
-export const streamAssignments = (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); 
-  res.flushHeaders();
+export const pollRealtimeEvents = async (req, res) => {
+  try {
+    const sinceId = req.query.sinceId ? parseInt(req.query.sinceId, 10) : null;
 
-  const userId = req.role.name === 'super_admin' ? '__ADMIN__' : req.user.sub;
-  // Optional: the client includes its current vertical at connect time so
-  // vertical-scoped broadcasts can be filtered from the very first message,
-  // not just after the first explicit update (see updateStreamVertical).
-  const initialVerticalId = typeof req.query.verticalId === 'string' ? req.query.verticalId : null;
-  addClient(userId, res, initialVerticalId);
+    // Lazily prune old rows (~5% of calls) — this log only needs to cover
+    // the polling window, not be a permanent history.
+    if (Math.random() < 0.05) {
+      query("DELETE FROM realtime_events WHERE created_at < NOW() - INTERVAL '2 days'").catch(err => {
+        console.error('⚠️ Failed to prune old realtime_events:', err.message);
+      });
+    }
 
-  const heartbeat = setInterval(() => {
-    res.write(': heartbeat\n\n');
-  }, 25000);
+    if (!sinceId || Number.isNaN(sinceId)) {
+      const latestRes = await query('SELECT COALESCE(MAX(id), 0) AS latest FROM realtime_events');
+      return res.status(200).json({
+        success: true,
+        data: { latestId: Number(latestRes.rows[0].latest), events: [] }
+      });
+    }
 
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    removeClient(userId, res);
-    res.end();
-  });
+    const eventsRes = await query(
+      'SELECT id, type, vertical_id FROM realtime_events WHERE id > $1 ORDER BY id ASC LIMIT 200',
+      [sinceId]
+    );
+
+    const latestId = eventsRes.rows.length > 0
+      ? eventsRes.rows[eventsRes.rows.length - 1].id
+      : sinceId;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        latestId: Number(latestId),
+        events: eventsRes.rows.map(r => ({ type: r.type, verticalId: r.vertical_id }))
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
 };
 
 /**
  * Bulk Assign Sub-Verticals to User (Deprecated - No-Op)
  */
 export const bulkAssign = async (req, res) => {
-  return res.status(200).json({ 
-    success: true, 
-    data: [] 
+  return res.status(200).json({
+    success: true,
+    data: []
   });
 };
 
@@ -48,34 +65,8 @@ export const bulkAssign = async (req, res) => {
  * Get current user's assigned sub-verticals (Deprecated - Returns empty array)
  */
 export const getMySubVerticals = async (req, res) => {
-  return res.status(200).json({ 
-    success: true, 
-    data: [] 
+  return res.status(200).json({
+    success: true,
+    data: []
   });
-};
-
-/**
- * Mint a short-lived SSE connection ticket
- */
-export const getStreamTicket = async (req, res) => {
-  try {
-    const ticket = signSseTicket(req.user.sub);
-    return res.status(200).json({ success: true, ticket });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-/**
- * Report the vertical the client is currently viewing, so vertical-scoped
- * broadcasts (bulk uploads, lead mutations) can be filtered server-side
- * without reconnecting the SSE stream every time the user switches vertical.
- * This is an efficiency optimization only — see the correctness note on
- * updateClientVertical in assignmentBroadcaster.js.
- */
-export const updateStreamVertical = async (req, res) => {
-  const { verticalId } = req.body;
-  const userId = req.role.name === 'super_admin' ? '__ADMIN__' : req.user.sub;
-  updateClientVertical(userId, verticalId || null);
-  return res.status(200).json({ success: true });
 };
