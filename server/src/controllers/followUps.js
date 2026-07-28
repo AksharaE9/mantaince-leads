@@ -1,4 +1,5 @@
 import { query } from '../config/db.js';
+import pool from '../config/db.js';
 import crypto from 'crypto';
 import { logAudit } from '../services/audit.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
@@ -600,29 +601,49 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
       pIdx++;
     }
 
-    // Count duplicate-flagged records in scope separately so the response
-    // can report skippedDuplicate explicitly, even though they're excluded
-    // from the candidate query below.
+    // Count duplicate-flagged records separately for reporting — they are
+    // excluded from promotion entirely (both full and soft-removal paths).
     const dupCountRes = await query(
       `SELECT COUNT(*) FROM cost_conversions c WHERE ${scopeWheres.join(' AND ')} AND c.duplicate_status = 'duplicate_removed'`,
       scopeParams
     );
     const skippedDuplicate = parseInt(dupCountRes.rows[0].count, 10);
 
+    // Fetch all non-duplicate candidates with their current promotion state.
+    // Three idempotency paths per record:
+    //   already_removed   — duplicate_status = 'promoted_removed' → skip entirely
+    //   linked_not_removed — has a follow_up but NOT soft-removed yet → soft-remove only
+    //   needs_full_promote — no follow_up, not removed → full atomic create + remove
     const candidatesRes = await query(`
-      SELECT c.id, c.business_name, c.assigned_to, c.sub_vertical_id,
-             EXISTS(SELECT 1 FROM follow_ups f WHERE f.cost_conversion_id = c.id) AS already_promoted
+      SELECT c.id, c.business_name, c.phone, c.name, c.data, c.status,
+             c.assigned_to, c.sub_vertical_id, c.vertical_id, c.duplicate_status,
+             c.promoted_at,
+             f.id AS existing_follow_up_id
       FROM cost_conversions c
-      WHERE ${scopeWheres.join(' AND ')} AND (c.duplicate_status IS NULL OR c.duplicate_status != 'duplicate_removed')
+      LEFT JOIN follow_ups f ON f.cost_conversion_id = c.id
+      WHERE ${scopeWheres.join(' AND ')}
+        AND (c.duplicate_status IS NULL OR c.duplicate_status != 'duplicate_removed')
     `, scopeParams);
 
-    const toPromote = [];
-    let alreadyPromoted = 0;
+    const alreadyRemoved = [];
+    const linkedNotRemoved = [];
+    const needsFullPromote = [];
     let skippedNoSubVertical = 0;
+
     for (const row of candidatesRes.rows) {
-      if (row.already_promoted) { alreadyPromoted++; continue; }
-      if (!row.sub_vertical_id) { skippedNoSubVertical++; continue; }
-      toPromote.push(row);
+      if (row.duplicate_status === 'promoted_removed') {
+        alreadyRemoved.push(row);
+        continue;
+      }
+      if (!row.sub_vertical_id) {
+        skippedNoSubVertical++;
+        continue;
+      }
+      if (row.existing_follow_up_id) {
+        linkedNotRemoved.push(row); // follow_up exists, COS not yet soft-removed
+      } else {
+        needsFullPromote.push(row); // no follow_up at all — needs full create+remove
+      }
     }
 
     if (dryRun) {
@@ -630,53 +651,117 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
         success: true,
         data: {
           dryRun: true,
-          wouldPromote: toPromote.length,
-          alreadyPromoted, skippedDuplicate, skippedNoSubVertical,
+          wouldFullyPromote: needsFullPromote.length,
+          wouldSoftRemoveOnly: linkedNotRemoved.length,
+          alreadyPromotedAndRemoved: alreadyRemoved.length,
+          skippedDuplicate,
+          skippedNoSubVertical,
         },
       });
     }
 
-    let promoted = 0;
+    let promoted = 0;       // full create+remove
+    let softRemovedOnly = 0; // soft-remove only (follow_up already existed)
     let failed = 0;
     const errors = [];
     const today = new Date().toISOString().slice(0, 10);
     const promotedIds = [];
+    const softRemovedIds = [];
 
-    for (const row of toPromote) {
+    // ── Path A: Full atomic move (create follow_up + soft-remove COS) ─────────
+    for (const row of needsFullPromote) {
+      const txClient = await pool.connect();
       try {
-        const id = crypto.randomUUID();
+        await txClient.query('BEGIN');
+
+        const followUpId = crypto.randomUUID();
         const assignedToId = row.assigned_to || req.user.sub;
-        const description = `[System-generated] Promoted from COS lead "${row.business_name || 'Unnamed lead'}" via bulk promotion.`;
-        await query(`
+        const description = `[System-promoted] From COS record "${row.business_name || row.name || 'Unnamed'}" — bulk promotion.`;
+
+        await txClient.query(`
           INSERT INTO follow_ups (id, cost_conversion_id, sub_vertical_id, assigned_to_id, created_by_id, follow_up_date, description, status)
           VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
-        `, [id, row.id, row.sub_vertical_id, assignedToId, req.user.sub, today, description]);
+        `, [followUpId, row.id, row.sub_vertical_id, assignedToId, req.user.sub, today, description]);
+
+        await txClient.query(`
+          UPDATE cost_conversions
+          SET duplicate_status = 'promoted_removed',
+              promoted_at = NOW(),
+              promoted_to_follow_up_id = $1,
+              promoted_by = $2,
+              updated_at = NOW()
+          WHERE id = $3
+        `, [followUpId, req.user.sub, row.id]);
+
+        await txClient.query('COMMIT');
         promoted++;
         promotedIds.push(row.id);
       } catch (err) {
+        await txClient.query('ROLLBACK').catch(() => {});
         failed++;
         errors.push({ costConversionId: row.id, reason: err.message });
+      } finally {
+        txClient.release();
       }
     }
 
-    if (promoted > 0) {
+    // ── Path B: Soft-remove only (follow_up already existed, COS not removed) ──
+    // No new follow_up is created — the existing one is kept as-is.
+    // This handles the legacy promotion runs that were link-only.
+    for (const row of linkedNotRemoved) {
+      try {
+        await query(`
+          UPDATE cost_conversions
+          SET duplicate_status = 'promoted_removed',
+              promoted_at = NOW(),
+              promoted_to_follow_up_id = $1,
+              promoted_by = $2,
+              updated_at = NOW()
+          WHERE id = $3
+        `, [row.existing_follow_up_id, req.user.sub, row.id]);
+        softRemovedOnly++;
+        softRemovedIds.push(row.id);
+      } catch (err) {
+        failed++;
+        errors.push({ costConversionId: row.id, reason: err.message, path: 'soft_remove_only' });
+      }
+    }
+
+    if (promoted > 0 || softRemovedOnly > 0) {
       await logAudit(req, {
         action: 'follow_up.bulk_promoted',
-        targetCollection: 'follow_ups',
+        targetCollection: 'cost_conversions',
         targetId: verticalId,
-        after: { promoted, costConversionIds: promotedIds },
+        after: {
+          promoted,
+          softRemovedOnly,
+          promotedIds,
+          softRemovedIds,
+        },
         metadata: { agentId: agentId || null },
         awaitWrite: true,
       });
       await cacheDeletePattern('calendar:*');
-      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'bulk_promote' });
+      // Signal both sections — COS viewers see records disappear; Follow-ups viewers see new records
+      broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'bulk_promote_move' });
+      broadcastToAll({ type: 'FOLLOWUP_CREATED', verticalId: null }); // unscoped — follow-ups page must refresh
     }
 
     return res.status(200).json({
       success: true,
-      data: { dryRun: false, promoted, alreadyPromoted, skippedDuplicate, skippedNoSubVertical, failed, errors },
+      data: {
+        dryRun: false,
+        promoted,
+        softRemovedOnly,
+        alreadyPromotedAndRemoved: alreadyRemoved.length,
+        skippedDuplicate,
+        skippedNoSubVertical,
+        failed,
+        errors,
+      },
     });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 };
+

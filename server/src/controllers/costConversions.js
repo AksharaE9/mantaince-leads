@@ -108,10 +108,9 @@ export const getCostConversions = async (req, res) => {
         const sortCol  = ['createdAt', 'updatedAt', 'businessName', 'name', 'status'].includes(sortBy) ? SORT_COLUMN_MAP[sortBy] : 'l.created_at';
         // ── Build WHERE clauses dynamically ───────────────────────────────
         const params  = [verticalId];
-        // Rows flagged 'duplicate_removed' by the Find & Remove Duplicates
-        // feature are soft-hidden from normal listing, same as is_deleted —
-        // but reversibly (see the duplicate_status column comment in db.js).
-        const wheres  = ['l.vertical_id = $1', 'l.is_deleted = false', "(l.duplicate_status IS NULL OR l.duplicate_status != 'duplicate_removed')"];
+        // Rows flagged 'duplicate_removed' or 'promoted_removed' are soft-hidden
+        // from normal listing — reversible by clearing those columns, never hard-deleted.
+        const wheres  = ['l.vertical_id = $1', 'l.is_deleted = false', "(l.duplicate_status IS NULL OR l.duplicate_status NOT IN ('duplicate_removed', 'promoted_removed'))"];
         let   pIdx    = 2;
 
         const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
