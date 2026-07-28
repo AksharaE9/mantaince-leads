@@ -12,6 +12,7 @@ import { getCsvLogs, getCsvLogById, streamFailedRows } from '../controllers/csv.
 import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
 import checkPermission from '../middleware/checkPermission.js';
+import { rateLimiter } from '../middleware/rateLimit.js';
 
 const router = express.Router();
 
@@ -47,7 +48,7 @@ router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exp
 
 router.get('/import-template', checkPermission('csv:template'), downloadRawDataTemplate);
 router.get('/schema', checkPermission('csv:template'), getRawDataSchema);
-router.post('/upload', checkPermission('csv:upload'), upload.single('file'), uploadRawDataCsv);
+router.post('/upload', checkPermission('csv:upload'), rateLimiter('raw_data_csv_upload', 20, 3600), upload.single('file'), uploadRawDataCsv);
 
 // The csv_upload_logs status/log/error-report endpoints are entity-agnostic
 // (they key off batchId, not entity_type) — reused as-is, no duplication.
