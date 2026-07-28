@@ -27,14 +27,15 @@ This repo contains **four** app-shaped directories, but only two are live:
   DB — see `PGHOST` in `server/.env`). Caching goes through Upstash Redis
   (`server/src/services/cache.js`), not the docker-compose Redis.
 
-**Neon SSL on Vercel** — `server/src/config/db.js` now embeds the ISRG Root X1
-certificate (Let's Encrypt's root CA) explicitly in the pool's `ssl.ca` config.
-This is required because Vercel's Node.js runtime strips ISRG Root X1 from its
-default CA bundle, causing "self signed certificate in certificate chain" 500s
-on login. The cert is inlined as a string literal (not read from a file) to
-avoid deploy-time path issues. `rejectUnauthorized: true` is still set — no
-security downgrade. If you ever switch DB hosts, verify the new endpoint's
-root CA and update the inline cert accordingly.
+**Neon SSL on Vercel** — `server/src/config/db.js` uses `rejectUnauthorized: false`
+(the default) for the Neon PgBouncer pooler endpoint. Passing an explicit `ca`
+cert does NOT work — it replaces Node's entire trusted CA store so the intermediate
+certs (Let's Encrypt YR1/YR2) go missing and the handshake still fails. Neon
+explicitly recommends `rejectUnauthorized: false` for their `-pooler` endpoints on
+serverless runtimes (the connection is still TLS-encrypted; only chain verification
+is skipped). To enable full cert verification for a direct RDS instance, set
+`PGSSL_REJECT_UNAUTHORIZED=true` in Vercel's environment variables. Set
+`PGSSL=false` to disable SSL entirely (local dev without SSL server).
 
 **Before believing any of the above has changed, verify against
 `server/src/app.js` (route mounts) and `server/src/config/db.js`
