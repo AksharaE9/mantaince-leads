@@ -36,6 +36,7 @@ import GeotagCapture from '../components/GeotagCapture.jsx';
 import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
 import SearchableOperatorSelect from '../components/SearchableOperatorSelect.jsx';
 import CsvImportModal from '../components/CsvImportModal.jsx';
+import { extractErrorMessage } from '../utils/errorMessage.js';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
@@ -567,7 +568,7 @@ export const FollowUpsPositivesPage = () => {
       fetchTodayCount();
     } catch (err) {
       setLeads(previousLeads);
-      toast.error(err.response?.data?.error || 'Save failed.');
+      toast.error(extractErrorMessage(err, 'Save failed.'));
     }
   };
 

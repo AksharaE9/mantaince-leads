@@ -6,6 +6,8 @@ import axios from '../api/axios.js';
 import Loader from './Loader.jsx';
 import SearchableOperatorSelect from './SearchableOperatorSelect.jsx';
 import { normalizeHeaderKey, validateParsedRowsAgainstSchema } from '../utils/leadImportValidation.js';
+import { downloadCsvFromEndpoint } from '../utils/downloadReport.js';
+import { extractErrorMessage } from '../utils/errorMessage.js';
 
 const ACCEPTED_EXTENSIONS = ['.csv', '.xlsx', '.xls'];
 
@@ -217,22 +219,13 @@ export default function CsvImportModal({
       }, 2000);
     } catch (err) {
       setUploadStatus('failed');
-      toast.error(err.response?.data?.error || 'Failed to upload file');
+      toast.error(extractErrorMessage(err, 'Failed to upload file'));
     }
   };
 
   const downloadErrorReport = async () => {
     try {
-      const res = await axios.get(ep.failedRows(uploadResult.batchId), { responseType: 'blob' });
-      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `error-report-${uploadResult.batchId}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      await downloadCsvFromEndpoint(ep.failedRows(uploadResult.batchId), `error-report-${uploadResult.batchId}.csv`);
     } catch {
       toast.error('Failed to download error report.');
     }

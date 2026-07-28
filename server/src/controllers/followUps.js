@@ -5,6 +5,8 @@ import { logAudit } from '../services/audit.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { cacheGet, cacheSet, cacheDelete, cacheDeletePattern } from '../services/cache.js';
 import { isValidUUID } from '../utils/validators/index.js';
+import { sendControllerError } from '../utils/dbErrors.js';
+import { operationError, ErrorCodes } from '../utils/operationError.js';
 
 /**
  * GET /cost-conversions/:costConversionId/follow-ups
@@ -67,7 +69,7 @@ export const getFollowUps = async (req, res) => {
     const result = await query(sql, params);
     return res.status(200).json({ success: true, data: result.rows });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return sendControllerError(res, error, 'getFollowUps', { section: 'follow_ups', operation: 'get_follow_ups' });
   }
 };
 
@@ -126,7 +128,7 @@ export const createFollowUp = async (req, res) => {
 
     return res.status(201).json({ success: true, data: newFollowUp });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return sendControllerError(res, error, 'createFollowUp', { section: 'follow_ups', operation: 'create_follow_up' });
   }
 };
 
@@ -240,7 +242,7 @@ export const updateFollowUp = async (req, res) => {
 
     return res.status(200).json({ success: true, data: updated });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return sendControllerError(res, error, 'updateFollowUp', { section: 'follow_ups', operation: 'update_follow_up', recordId: id });
   }
 };
 
@@ -287,7 +289,7 @@ export const deleteFollowUp = async (req, res) => {
 
     return res.status(200).json({ success: true });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return sendControllerError(res, error, 'deleteFollowUp', { section: 'follow_ups', operation: 'delete_follow_up', recordId: id });
   }
 };
 
@@ -331,7 +333,7 @@ export const getFollowUpSummary = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return sendControllerError(res, error, 'getFollowUpSummary', { section: 'follow_ups', operation: 'get_follow_up_summary' });
   }
 };
 
@@ -430,7 +432,7 @@ export const getCalendarGrid = async (req, res) => {
 
     return res.status(200).json({ success: true, data: calendar });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return sendControllerError(res, error, 'getCalendarGrid', { section: 'follow_ups', operation: 'get_calendar_grid' });
   }
 };
 
@@ -484,7 +486,7 @@ export const getCalendarFollowUpsByDate = async (req, res) => {
     const result = await query(sql, params);
     return res.status(200).json({ success: true, data: result.rows });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return sendControllerError(res, error, 'getCalendarFollowUpsByDate', { section: 'follow_ups', operation: 'get_calendar_by_date' });
   }
 };
 
@@ -546,7 +548,7 @@ export const getFollowUpVerticalStats = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    return sendControllerError(res, error, 'getFollowUpVerticalStats', { section: 'follow_ups', operation: 'get_follow_up_stats' });
   }
 };
 
@@ -576,15 +578,16 @@ export const getFollowUpVerticalStats = async (req, res) => {
  */
 export const promoteCosLeadsToFollowUps = async (req, res) => {
   const { verticalId, agentId, costConversionIds, dryRun = true } = req.body;
+  let reportId = null;
   try {
     if (!isValidUUID(verticalId)) {
-      return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+      return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'A valid verticalId is required', section: 'cos', operation: 'promote', field: 'verticalId' });
     }
     if (agentId && !isValidUUID(agentId)) {
-      return res.status(400).json({ success: false, error: 'agentId must be a valid UUID if provided' });
+      return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'agentId must be a valid UUID if provided', section: 'cos', operation: 'promote', field: 'agentId' });
     }
     if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-      return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+      return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section: 'cos', operation: 'promote' });
     }
 
     const scopeWheres = ['c.vertical_id = $1', 'c.is_deleted = false', "c.lead_type != 'POSITIVE'"];
@@ -668,6 +671,20 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
     const promotedIds = [];
     const softRemovedIds = [];
 
+    // Persisted operation report (Step 2): reuses csv_upload_logs — the same
+    // table/download machinery bulk CSV uploads already have — discriminated
+    // via operation_type='promote'. Only real (non-dry-run) runs write one:
+    // a dry run is a zero-write preview by design, so a report row for it
+    // would be a report about nothing that actually happened. Created here
+    // (not queued) since this operation runs synchronously in-request; its
+    // own id doubles as the correlationId for every pino log line below.
+    reportId = crypto.randomUUID();
+    const totalCandidates = needsFullPromote.length + linkedNotRemoved.length + alreadyRemoved.length + skippedDuplicate + skippedNoSubVertical;
+    await query(`
+      INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, status, lead_type, entity_type, operation_type, total_rows)
+      VALUES ($1, $2, $3, 'processing', 'CALL', 'lead', 'promote', $4)
+    `, [reportId, req.user.sub, verticalId, totalCandidates]);
+
     // ── Path A: Full atomic move (create follow_up + soft-remove COS) ─────────
     for (const row of needsFullPromote) {
       const txClient = await pool.connect();
@@ -699,7 +716,7 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
       } catch (err) {
         await txClient.query('ROLLBACK').catch(() => {});
         failed++;
-        errors.push({ costConversionId: row.id, reason: err.message });
+        errors.push({ recordId: row.id, code: ErrorCodes.DB_CONSTRAINT, reason: err.message });
       } finally {
         txClient.release();
       }
@@ -723,9 +740,16 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
         softRemovedIds.push(row.id);
       } catch (err) {
         failed++;
-        errors.push({ costConversionId: row.id, reason: err.message, path: 'soft_remove_only' });
+        errors.push({ recordId: row.id, code: ErrorCodes.DB_CONSTRAINT, reason: err.message, path: 'soft_remove_only' });
       }
     }
+
+    await query(`
+      UPDATE csv_upload_logs
+      SET status = 'done', success_count = $1, failed_count = $2, duplicate_count = $3,
+          errors = $4::jsonb, processing_started_at = NOW(), processing_finished_at = NOW()
+      WHERE id = $5
+    `, [promoted + softRemovedOnly, failed, skippedDuplicate, JSON.stringify(errors), reportId]);
 
     if (promoted > 0 || softRemovedOnly > 0) {
       await logAudit(req, {
@@ -738,7 +762,7 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
           promotedIds,
           softRemovedIds,
         },
-        metadata: { agentId: agentId || null },
+        metadata: { agentId: agentId || null, reportId },
         awaitWrite: true,
       });
       await cacheDeletePattern('calendar:*');
@@ -758,10 +782,15 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
         skippedNoSubVertical,
         failed,
         errors,
+        reportId,
       },
     });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    if (reportId) {
+      await query(`UPDATE csv_upload_logs SET status = 'failed', errors = errors || $1::jsonb, processing_finished_at = NOW() WHERE id = $2`,
+        [JSON.stringify([{ code: ErrorCodes.INTERNAL_ERROR, reason: error.message }]), reportId]).catch(() => {});
+    }
+    return sendControllerError(res, error, 'promoteCosLeadsToFollowUps', { section: 'cos', operation: 'promote', recordId: reportId });
   }
 };
 

@@ -3,7 +3,7 @@ import { Truck, Link2 } from 'lucide-react';
 import DataSectionPage from '../components/DataSectionPage.jsx';
 import DeliveryDataModal from '../components/DeliveryDataModal.jsx';
 
-const fmtDate = (v) => (v ? String(v).slice(0, 10) : '—');
+const fmtDate = (v) => (v ? String(v).slice(0, 10) : '-');
 
 const config = {
   title: 'Delivery Data',
@@ -11,7 +11,7 @@ const config = {
   icon: Truck,
   columns: [
     { key: 'date', label: 'Date', render: (r) => fmtDate(r.date) },
-    { key: 'employeeName', label: 'Employee Name', render: (r) => r.assignee_name || '—' },
+    { key: 'employeeName', label: 'Employee Name', render: (r) => r.assignee_name || '-' },
     {
       key: 'businessName',
       label: 'Business Name',
@@ -29,14 +29,14 @@ const config = {
     { key: 'city', label: 'City' },
     { key: 'phoneNumber', label: 'Phone Number', render: (r) => r.phone_number },
     { key: 'deliveryDate', label: 'Delivery Date', render: (r) => fmtDate(r.delivery_date) },
-    { key: 'deliveryTime', label: 'Delivery Time', render: (r) => r.delivery_time || '—' },
+    { key: 'deliveryTime', label: 'Delivery Time', render: (r) => r.delivery_time || '-' },
   ],
   detailFields: [
-    { key: 'businessType', label: 'Business Type', render: (r) => r.business_type || '—' },
+    { key: 'businessType', label: 'Business Type', render: (r) => r.business_type || '-' },
     { key: 'area', label: 'Area' },
     { key: 'address', label: 'Address' },
     { key: 'appointmentDate', label: 'Appointment Date', render: (r) => fmtDate(r.appointment_date) },
-    { key: 'appointmentTimings', label: 'Appointment Timings', render: (r) => r.appointment_timings || '—' },
+    { key: 'appointmentTimings', label: 'Appointment Timings', render: (r) => r.appointment_timings || '-' },
     { key: 'remarks', label: 'Remarks' },
   ],
   sortableColumns: ['date', 'businessName', 'city', 'deliveryDate'],

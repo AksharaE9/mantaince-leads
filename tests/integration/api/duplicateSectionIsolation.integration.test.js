@@ -42,9 +42,12 @@ describe('Duplicate detection: strict per-section isolation', () => {
         const meRes = await query("SELECT id FROM users WHERE email = 'admin@gmail.com'");
         agentId = meRes.rows[0]?.id;
         await query('UPDATE users SET vertical_access = array_append(vertical_access, $1) WHERE id = $2', [verticalId, agentId]);
+
+        process.env.VERCEL = '1';
     });
 
     afterAll(async () => {
+        delete process.env.VERCEL;
         if (verticalId) {
             await query('DELETE FROM csv_upload_logs WHERE vertical_id = $1', [verticalId]);
             await query('DELETE FROM cost_conversions WHERE vertical_id = $1', [verticalId]);

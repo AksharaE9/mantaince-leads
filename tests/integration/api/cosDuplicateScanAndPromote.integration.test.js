@@ -196,7 +196,7 @@ describe('COS duplicate scan + promote to follow-ups', () => {
         .expect(200);
 
       expect(res.body.data.dryRun).toBe(true);
-      expect(res.body.data.wouldPromote).toBe(1);
+      expect(res.body.data.wouldFullyPromote).toBe(1);
 
       const followUpRows = await query('SELECT * FROM follow_ups WHERE cost_conversion_id = $1', [leadId]);
       expect(followUpRows.rows.length).toBe(0);
@@ -238,7 +238,7 @@ describe('COS duplicate scan + promote to follow-ups', () => {
         .expect(200);
 
       expect(secondRes.body.data.promoted).toBe(0);
-      expect(secondRes.body.data.alreadyPromoted).toBe(1);
+      expect(secondRes.body.data.alreadyPromotedAndRemoved).toBe(1);
 
       const followUpRows = await query('SELECT * FROM follow_ups WHERE cost_conversion_id = $1', [leadId]);
       expect(followUpRows.rows.length).toBe(1);

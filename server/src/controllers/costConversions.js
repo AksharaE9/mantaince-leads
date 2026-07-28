@@ -16,6 +16,7 @@ import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { z } from 'zod';
 import { bulkInsert } from '../db/bulkInsert.js';
 import { sendControllerError } from '../utils/dbErrors.js';
+import { operationError, ErrorCodes } from '../utils/operationError.js';
 
 // ── CSV escape helper (module-level, reused by export) ────────────────────────
 // H5: prefix any value whose first character Excel/Sheets treats as a
@@ -287,18 +288,19 @@ export const createCostConversion = async (req, res) => {
         customValues = {}, stageId,
         status = 'new'
     } = req.body;
+    const section = leadType === 'POSITIVE' ? 'positives' : 'cos';
 
     if (!isValidUUID(verticalId)) {
-        return res.status(400).json({ success: false, error: 'Invalid vertical ID format' });
+        return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'Invalid vertical ID format', section, operation: 'single_add', field: 'verticalId' });
     }
     try {
         if (!subVerticalId || !isValidUUID(subVerticalId)) {
-            return res.status(400).json({ success: false, error: 'Sub-vertical selection is mandatory for creating Cost/Conversions.' });
+            return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'Sub-vertical selection is mandatory for creating Cost/Conversions.', section, operation: 'single_add', field: 'subVerticalId' });
         }
 
         // RBAC scoping
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+            return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section, operation: 'single_add' });
         }
 
         const leadId = crypto.randomUUID();
@@ -310,14 +312,14 @@ export const createCostConversion = async (req, res) => {
         const gCap = geotagCapturedAt ? new Date(geotagCapturedAt) : null;
 
         if (!name || !name.trim()) {
-            return res.status(400).json({ success: false, error: 'Business / Person / Shop / Company name is mandatory' });
+            return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'Business / Person / Shop / Company name is mandatory', section, operation: 'single_add', field: 'name' });
         }
         if (!phone || !phone.toString().trim()) {
-            return res.status(400).json({ success: false, error: 'Contact number is mandatory' });
+            return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'Contact number is mandatory', section, operation: 'single_add', field: 'phone' });
         }
         const sanitizedPhone = phone.toString().replace(/[^\d+]/g, '').trim();
         if (!sanitizedPhone) {
-            return res.status(400).json({ success: false, error: 'Contact number is mandatory' });
+            return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'Contact number is mandatory', section, operation: 'single_add', field: 'phone' });
         }
 
         let targetEmployeeName = '';
@@ -364,7 +366,11 @@ export const createCostConversion = async (req, res) => {
         ]);
 
         if (leadRes.rows.length === 0) {
-            return res.status(409).json({ success: false, error: 'Cost/Conversion with this phone number already exists' });
+            return operationError(res, {
+                status: 409, code: ErrorCodes.DUPLICATE_PHONE,
+                message: `Phone number ${sanitizedPhone} already exists in ${section === 'positives' ? 'Positives' : 'COS'} for this vertical`,
+                section, operation: 'single_add', field: 'phone',
+            });
         }
 
         const lead = leadRes.rows[0];
@@ -380,20 +386,20 @@ export const createCostConversion = async (req, res) => {
             for (const field of customFieldsRes.rows) {
                 const val = customValues[field.field_key];
                 if (field.is_required && (val === undefined || val === null || val === '')) {
-                    return res.status(400).json({ success: false, error: `Custom field '${field.field_key}' is required` });
+                    return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: `Custom field '${field.field_key}' is required`, section, operation: 'single_add', field: field.field_key });
                 }
-                
+
                 if (val !== undefined && val !== null && val !== '') {
                     if (field.validation_regex) {
                         const testVal = val.toString();
                         // L3: length cap before testing — see MAX_REGEX_TEST_LENGTH comment above.
                         if (testVal.length > MAX_REGEX_TEST_LENGTH) {
-                            return res.status(400).json({ success: false, error: field.validation_message || `'${field.field_key}' is too long to validate (max ${MAX_REGEX_TEST_LENGTH} characters)` });
+                            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: field.validation_message || `'${field.field_key}' is too long to validate (max ${MAX_REGEX_TEST_LENGTH} characters)`, section, operation: 'single_add', field: field.field_key });
                         }
                         try {
                             const rx = new RegExp(field.validation_regex);
                             if (!rx.test(testVal)) {
-                                return res.status(400).json({ success: false, error: field.validation_message || `Invalid format for '${field.field_key}'` });
+                                return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: field.validation_message || `Invalid format for '${field.field_key}'`, section, operation: 'single_add', field: field.field_key });
                             }
                         } catch (e) {
                             if (e.message.includes('Invalid format')) {
@@ -423,7 +429,7 @@ export const createCostConversion = async (req, res) => {
 
         return res.status(201).json({ success: true, data: lead });
     } catch (error) {
-        return res.status(500).json({ success: false, error: error.message });
+        return sendControllerError(res, error, 'createCostConversion', { section, operation: 'single_add' });
     }
 };
 
@@ -1141,17 +1147,18 @@ export const createCostConversionBulk = async (req, res) => {
  * listing (see getCostConversions) and from promotion (see promoteToFollowUps).
  */
 export const scanCosDuplicates = async (req, res) => {
+    let reportId = null;
     try {
         const { verticalId, agentId, dryRun = true } = req.body;
 
         if (!isValidUUID(verticalId)) {
-            return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'A valid verticalId is required', section: 'cos', operation: 'duplicate_scan', field: 'verticalId' });
         }
         if (agentId && !isValidUUID(agentId)) {
-            return res.status(400).json({ success: false, error: 'agentId must be a valid UUID if provided' });
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'agentId must be a valid UUID if provided', section: 'cos', operation: 'duplicate_scan', field: 'agentId' });
         }
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+            return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section: 'cos', operation: 'duplicate_scan' });
         }
 
         const params = [verticalId];
@@ -1191,17 +1198,40 @@ export const scanCosDuplicates = async (req, res) => {
             });
         }
 
+        // Persisted operation report (Step 2), same csv_upload_logs
+        // machinery bulk uploads and promote already use, discriminated via
+        // operation_type='duplicate_scan'. Only the real (non-dry-run) pass
+        // writes one — see promoteCosLeadsToFollowUps for the same
+        // "dry run previews, doesn't get a report" reasoning.
+        reportId = crypto.randomUUID();
+        await query(`
+            INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, status, lead_type, entity_type, operation_type, total_rows)
+            VALUES ($1, $2, $3, 'processing', 'CALL', 'lead', 'duplicate_scan', $4)
+        `, [reportId, req.user.sub, verticalId, totalFlagged]);
+
+        const scanErrors = [];
         for (const g of groups) {
             const duplicateIds = g.duplicates.map(d => d.id);
             if (duplicateIds.length === 0) continue;
-            await query(
-                `UPDATE cost_conversions
-                 SET duplicate_status = 'duplicate_removed', duplicate_of_id = $1,
-                     duplicate_flagged_at = NOW(), duplicate_flagged_by = $2
-                 WHERE id = ANY($3::uuid[])`,
-                [g.kept.id, req.user.sub, duplicateIds]
-            );
+            try {
+                await query(
+                    `UPDATE cost_conversions
+                     SET duplicate_status = 'duplicate_removed', duplicate_of_id = $1,
+                         duplicate_flagged_at = NOW(), duplicate_flagged_by = $2
+                     WHERE id = ANY($3::uuid[])`,
+                    [g.kept.id, req.user.sub, duplicateIds]
+                );
+            } catch (err) {
+                scanErrors.push({ recordId: g.kept.id, code: ErrorCodes.DB_CONSTRAINT, reason: err.message, phone: g.phone });
+            }
         }
+
+        await query(`
+            UPDATE csv_upload_logs
+            SET status = 'done', success_count = $1, failed_count = $2, errors = $3::jsonb,
+                processing_started_at = NOW(), processing_finished_at = NOW()
+            WHERE id = $4
+        `, [totalFlagged - scanErrors.length, scanErrors.length, JSON.stringify(scanErrors), reportId]);
 
         if (totalFlagged > 0) {
             await logAudit(req, {
@@ -1222,9 +1252,13 @@ export const scanCosDuplicates = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            data: { dryRun: false, groupsFound: groups.length, totalFlagged, groups },
+            data: { dryRun: false, groupsFound: groups.length, totalFlagged, groups, reportId },
         });
     } catch (error) {
-        return sendControllerError(res, error, 'scanCosDuplicates');
+        if (reportId) {
+            await query(`UPDATE csv_upload_logs SET status = 'failed', errors = errors || $1::jsonb, processing_finished_at = NOW() WHERE id = $2`,
+                [JSON.stringify([{ code: ErrorCodes.INTERNAL_ERROR, reason: error.message }]), reportId]).catch(() => {});
+        }
+        return sendControllerError(res, error, 'scanCosDuplicates', { section: 'cos', operation: 'duplicate_scan', recordId: reportId });
     }
 };

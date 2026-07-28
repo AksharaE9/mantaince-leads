@@ -6,7 +6,9 @@ import { runInBackground } from '../utils/background.js';
 import { query } from '../config/db.js';
 import { isValidUUID } from '../utils/validators/index.js';
 import { sendControllerError } from '../utils/dbErrors.js';
+import { operationError, ErrorCodes } from '../utils/operationError.js';
 import { logAudit } from '../services/audit.js';
+import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import {
     DELIVERY_DATA_FIELDS,
     validateDeliveryDataRow,
@@ -169,10 +171,10 @@ export const createDeliveryData = async (req, res) => {
     const { verticalId } = req.body;
     try {
         if (!verticalId || !isValidUUID(verticalId)) {
-            return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'A valid verticalId is required', section: 'delivery_data', operation: 'single_add', field: 'verticalId' });
         }
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+            return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section: 'delivery_data', operation: 'single_add' });
         }
 
         const [agents, knownBusinessTypes] = await Promise.all([
@@ -198,7 +200,13 @@ export const createDeliveryData = async (req, res) => {
 
         const { errors, warnings, assignedUserId } = validateDeliveryDataRow(row, { agents, knownBusinessTypes });
         if (errors.length > 0) {
-            return res.status(422).json({ success: false, error: 'Validation failed', errors });
+            return operationError(res, {
+                status: 422, code: ErrorCodes.VALIDATION_FAILED,
+                message: errors.map(e => e.message).join('; '),
+                section: 'delivery_data', operation: 'single_add',
+                field: errors.length === 1 ? errors[0].field : undefined,
+                fields: errors,
+            });
         }
 
         const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
@@ -223,10 +231,11 @@ export const createDeliveryData = async (req, res) => {
         ]);
 
         logAudit(req, { action: 'delivery_data.create', targetCollection: 'delivery_data', targetId: id, after: insertRes.rows[0] });
+        broadcastToAll({ type: 'DELIVERY_DATA_MUTATED', verticalId, action: 'create' });
 
         return res.status(201).json({ success: true, data: insertRes.rows[0], warnings });
     } catch (error) {
-        return sendControllerError(res, error, 'createDeliveryData');
+        return sendControllerError(res, error, 'createDeliveryData', { section: 'delivery_data', operation: 'single_add' });
     }
 };
 
@@ -297,12 +306,12 @@ export const uploadDeliveryDataCsv = async (req, res) => {
     const { verticalId } = req.body;
     const file = req.file;
     try {
-        if (!file) return res.status(400).json({ success: false, error: 'A CSV or Excel file is required' });
+        if (!file) return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'A CSV or Excel file is required', section: 'delivery_data', operation: 'bulk_upload', field: 'file' });
         if (!verticalId || !isValidUUID(verticalId)) {
-            return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'A valid verticalId is required', section: 'delivery_data', operation: 'bulk_upload', field: 'verticalId' });
         }
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+            return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section: 'delivery_data', operation: 'bulk_upload' });
         }
 
         const logId = crypto.randomUUID();
@@ -379,6 +388,6 @@ export const uploadDeliveryDataCsv = async (req, res) => {
             data: { batchId: uploadLog.id, status: 'queued', message: 'File uploaded and queued for processing.' },
         });
     } catch (error) {
-        return sendControllerError(res, error, 'uploadDeliveryDataCsv');
+        return sendControllerError(res, error, 'uploadDeliveryDataCsv', { section: 'delivery_data', operation: 'bulk_upload' });
     }
 };

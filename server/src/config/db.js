@@ -140,6 +140,9 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'cost_conversions' AND column_name = 'promoted_at'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'csv_upload_logs' AND column_name = 'operation_type'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -561,6 +564,16 @@ const runMigrations = async () => {
         -- upload/queue/worker plumbing serves both Leads and Raw Data.
         -- Existing rows are all lead imports, hence the 'lead' default.
         ALTER TABLE csv_upload_logs ADD COLUMN IF NOT EXISTS entity_type VARCHAR(20) NOT NULL DEFAULT 'lead';
+
+        -- Standardized error/exception reporting: this table already
+        -- persisted a good per-row {row, reason, originalRow} report for
+        -- bulk uploads (all 4 sections). operation_type lets the SAME table
+        -- also carry a persisted, downloadable report for the two other
+        -- bulk-ish operations that previously had none: promoting COS leads
+        -- to Follow-ups, and COS duplicate-scan. 'bulk_upload' is the
+        -- default so every pre-existing row (and every un-migrated INSERT)
+        -- is correctly classified with zero backfill needed.
+        ALTER TABLE csv_upload_logs ADD COLUMN IF NOT EXISTS operation_type VARCHAR(30) NOT NULL DEFAULT 'bulk_upload';
 
         CREATE TABLE IF NOT EXISTS raw_data (
             id UUID PRIMARY KEY,

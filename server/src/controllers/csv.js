@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendControllerError } from '../utils/dbErrors.js';
+import { operationError, ErrorCodes } from '../utils/operationError.js';
 import { isValidUUID } from '../utils/validators/index.js';
 import { getLeadImportSchema, getAssignableAgentNames } from '../services/leadImportSchema.js';
 import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
@@ -123,22 +124,23 @@ export const getImportSchema = async (req, res) => {
 export const uploadCsv = async (req, res) => {
     const { verticalId, assignedTo, subVerticalId, leadType = 'CALL' } = req.body;
     const file = req.file;
+    const section = leadType === 'POSITIVE' ? 'positives' : 'cos';
 
     try {
-        if (!file) return res.status(400).json({ success: false, error: 'A CSV or Excel file is required' });
+        if (!file) return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'A CSV or Excel file is required', section, operation: 'bulk_upload', field: 'file' });
         if (!verticalId || !isValidUUID(verticalId)) {
-            return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'A valid verticalId is required', section, operation: 'bulk_upload', field: 'verticalId' });
         }
         if (!subVerticalId || !isValidUUID(subVerticalId)) {
-            return res.status(400).json({ success: false, error: 'Sub-vertical selection is mandatory for uploading leads.' });
+            return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'Sub-vertical selection is mandatory for uploading leads.', section, operation: 'bulk_upload', field: 'subVerticalId' });
         }
         if (assignedTo && !isValidUUID(assignedTo)) {
-            return res.status(400).json({ success: false, error: 'Invalid assignedTo agent ID' });
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'Invalid assignedTo agent ID', section, operation: 'bulk_upload', field: 'assignedTo' });
         }
 
         // Strict Vertical Scoping check
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+            return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section, operation: 'bulk_upload' });
         }
 
         const targetAssignedTo = (assignedTo && assignedTo.length > 0) ? assignedTo : null;
@@ -240,22 +242,47 @@ export const uploadCsv = async (req, res) => {
             }
         });
     } catch (error) {
-        return sendControllerError(res, error, 'uploadCsv');
+        return sendControllerError(res, error, 'uploadCsv', { section, operation: 'bulk_upload' });
     }
 };
 
 /**
- * GET /leads/csv/logs
+ * GET /leads/csv/logs — also serves as the backing list endpoint for the
+ * Operation Reports page (client/src/pages/OperationReportsPage.jsx), since
+ * csv_upload_logs now persists reports for bulk_upload/promote/
+ * duplicate_scan alike (operation_type column). `operationType`/`entityType`
+ * are optional filters on top of the existing role-based vertical scoping —
+ * additive, so every pre-existing caller (with neither param) is unaffected.
+ * (No separate ownership/ uploaded_by check is needed here: this route is
+ * gated by `checkPermission('csv:logs')` with no `csv:upload` fallback — see
+ * routes/costConversions.js — so every caller who reaches this controller
+ * already holds the full csv:logs permission, unlike getCsvLogById/
+ * streamFailedRows below, which allow a plain uploader in via csv:upload
+ * and must therefore restrict them to their own batches.)
  */
 export const getCsvLogs = async (req, res) => {
-    const { page = 1, limit = 15 } = req.query;
+    const { page = 1, limit = 15, operationType, entityType, verticalId } = req.query;
     try {
         let sql = 'SELECT l.*, v.name as vertical_name, u.name as user_name FROM csv_upload_logs l JOIN verticals v ON l.vertical_id = v.id JOIN users u ON l.uploaded_by = u.id';
+        const wheres = [];
         const params = [];
         if (req.user.role === 'vertical_admin') {
-            sql += ' WHERE l.vertical_id = ANY($1)';
             params.push(req.user.verticalAccess);
+            wheres.push(`l.vertical_id = ANY($${params.length})`);
         }
+        if (operationType) {
+            params.push(operationType);
+            wheres.push(`l.operation_type = $${params.length}`);
+        }
+        if (entityType) {
+            params.push(entityType);
+            wheres.push(`l.entity_type = $${params.length}`);
+        }
+        if (verticalId && isValidUUID(verticalId)) {
+            params.push(verticalId);
+            wheres.push(`l.vertical_id = $${params.length}`);
+        }
+        if (wheres.length > 0) sql += ' WHERE ' + wheres.join(' AND ');
 
         // M10: clamp to a sane upper bound and bind LIMIT/OFFSET as query
         // parameters instead of string-interpolating — matches rawData.js's
@@ -274,7 +301,7 @@ export const getCsvLogs = async (req, res) => {
         const logsRes = await query(sql, params);
         return res.status(200).json({ success: true, data: logsRes.rows });
     } catch (error) {
-        return res.status(500).json({ success: false, error: error.message });
+        return sendControllerError(res, error, 'getCsvLogs');
     }
 };
 
@@ -327,7 +354,7 @@ export const getCsvLogById = async (req, res) => {
 
         return res.status(200).json({ success: true, data: log });
     } catch (error) {
-        return res.status(500).json({ success: false, error: error.message });
+        return sendControllerError(res, error, 'getCsvLogById');
     }
 };
 
@@ -380,6 +407,6 @@ export const streamFailedRows = async (req, res) => {
         res.setHeader('Content-Disposition', `attachment; filename=error-report-${batchId}.csv`);
         return res.status(200).send(csvContent);
     } catch (error) {
-        return res.status(500).json({ success: false, error: error.message });
+        return sendControllerError(res, error, 'streamFailedRows');
     }
 };

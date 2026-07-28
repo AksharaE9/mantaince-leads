@@ -27,6 +27,7 @@ const RawDataPage = lazy(() => import('./pages/RawDataPage.jsx'));
 const DeliveryDataPage = lazy(() => import('./pages/DeliveryDataPage.jsx'));
 const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage.jsx'));
 const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage.jsx'));
+const OperationReportsPage = lazy(() => import('./pages/OperationReportsPage.jsx'));
 
 
 // Loader spinner
@@ -150,6 +151,11 @@ export const App = () => {
               <Route path="admin/audit-logs" element={
                 <PermissionRoute roleRequired="admin">
                   <AuditLogsPage />
+                </PermissionRoute>
+              } />
+              <Route path="admin/operation-reports" element={
+                <PermissionRoute roleRequired="admin">
+                  <OperationReportsPage />
                 </PermissionRoute>
               } />
 

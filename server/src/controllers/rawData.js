@@ -6,7 +6,9 @@ import { runInBackground } from '../utils/background.js';
 import { query } from '../config/db.js';
 import { isValidUUID } from '../utils/validators/index.js';
 import { sendControllerError } from '../utils/dbErrors.js';
+import { operationError, ErrorCodes } from '../utils/operationError.js';
 import { logAudit } from '../services/audit.js';
+import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import {
     RAW_DATA_FIELDS,
     validateRawDataRow,
@@ -167,10 +169,10 @@ export const createRawData = async (req, res) => {
     const { verticalId } = req.body;
     try {
         if (!verticalId || !isValidUUID(verticalId)) {
-            return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'A valid verticalId is required', section: 'raw_data', operation: 'single_add', field: 'verticalId' });
         }
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+            return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section: 'raw_data', operation: 'single_add' });
         }
 
         const [agents, knownBusinessTypes] = await Promise.all([
@@ -194,7 +196,13 @@ export const createRawData = async (req, res) => {
 
         const { errors, warnings, assignedUserId } = validateRawDataRow(row, { agents, knownBusinessTypes });
         if (errors.length > 0) {
-            return res.status(422).json({ success: false, error: 'Validation failed', errors });
+            return operationError(res, {
+                status: 422, code: ErrorCodes.VALIDATION_FAILED,
+                message: errors.map(e => e.message).join('; '),
+                section: 'raw_data', operation: 'single_add',
+                field: errors.length === 1 ? errors[0].field : undefined,
+                fields: errors,
+            });
         }
 
         const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
@@ -203,7 +211,11 @@ export const createRawData = async (req, res) => {
             [verticalId, phone]
         );
         if (dupRes.rows.length > 0) {
-            return res.status(409).json({ success: false, error: 'A raw data record with this phone number already exists' });
+            return operationError(res, {
+                status: 409, code: ErrorCodes.DUPLICATE_PHONE,
+                message: `Phone number ${phone} already exists in Raw Data for this vertical`,
+                section: 'raw_data', operation: 'single_add', field: 'phoneNumber', recordId: dupRes.rows[0].id,
+            });
         }
 
         const id = crypto.randomUUID();
@@ -223,10 +235,11 @@ export const createRawData = async (req, res) => {
         ]);
 
         logAudit(req, { action: 'raw_data.create', targetCollection: 'raw_data', targetId: id, after: insertRes.rows[0] });
+        broadcastToAll({ type: 'RAW_DATA_MUTATED', verticalId, action: 'create' });
 
         return res.status(201).json({ success: true, data: insertRes.rows[0], warnings });
     } catch (error) {
-        return sendControllerError(res, error, 'createRawData');
+        return sendControllerError(res, error, 'createRawData', { section: 'raw_data', operation: 'single_add' });
     }
 };
 
@@ -296,12 +309,12 @@ export const uploadRawDataCsv = async (req, res) => {
     const { verticalId } = req.body;
     const file = req.file;
     try {
-        if (!file) return res.status(400).json({ success: false, error: 'A CSV or Excel file is required' });
+        if (!file) return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'A CSV or Excel file is required', section: 'raw_data', operation: 'bulk_upload', field: 'file' });
         if (!verticalId || !isValidUUID(verticalId)) {
-            return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'A valid verticalId is required', section: 'raw_data', operation: 'bulk_upload', field: 'verticalId' });
         }
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+            return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section: 'raw_data', operation: 'bulk_upload' });
         }
 
         const logId = crypto.randomUUID();
@@ -378,6 +391,6 @@ export const uploadRawDataCsv = async (req, res) => {
             data: { batchId: uploadLog.id, status: 'queued', message: 'File uploaded and queued for processing.' },
         });
     } catch (error) {
-        return sendControllerError(res, error, 'uploadRawDataCsv');
+        return sendControllerError(res, error, 'uploadRawDataCsv', { section: 'raw_data', operation: 'bulk_upload' });
     }
 };

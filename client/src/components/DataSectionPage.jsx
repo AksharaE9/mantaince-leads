@@ -370,7 +370,7 @@ export default function DataSectionPage({ config }) {
                         </td>
                         {columns.map((col) => (
                           <td key={col.key} className="px-4 py-3 text-[--text-primary]">
-                            {col.render ? col.render(row) : (row[col.key] ?? '—')}
+                            {col.render ? col.render(row) : (row[col.key] || '-')}
                           </td>
                         ))}
                       </tr>
@@ -381,7 +381,7 @@ export default function DataSectionPage({ config }) {
                               {detailFields.map((f) => (
                                 <div key={f.key}>
                                   <span className="block font-black uppercase text-[9px] text-[--text-secondary]">{f.label}</span>
-                                  <span className="text-[--text-primary]">{f.render ? f.render(row) : (row[f.key] ?? '—')}</span>
+                                  <span className="text-[--text-primary]">{f.render ? f.render(row) : (row[f.key] || '-')}</span>
                                 </div>
                               ))}
                             </div>

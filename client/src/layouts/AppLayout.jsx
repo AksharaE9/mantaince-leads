@@ -4,7 +4,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Layers, Users, Settings, LogOut, ChevronDown,
   Menu, X, Bell, BarChart3, ChevronRight, FileSpreadsheet, Calendar, ClipboardList, TrendingUp, Terminal,
-  Database, Truck,
+  Database, Truck, AlertTriangle,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore.js';
 import { useUiStore } from '../store/uiStore.js';
@@ -315,6 +315,7 @@ export const AppLayout = () => {
               {navLink('/admin/users', Users, 'User Accounts', true)}
               {navLink('/admin/verticals', Settings, 'Verticals & Fields', false)}
               {navLink('/admin/audit-logs', Terminal, 'Audit Logs', true)}
+              {navLink('/admin/operation-reports', AlertTriangle, 'Operation Reports', true)}
 
             </div>
           )}
@@ -414,6 +415,7 @@ export const AppLayout = () => {
                     ['/admin/users', Users, 'User Accounts'],
                     ['/admin/verticals', Settings, 'Verticals & Fields'],
                     ['/admin/audit-logs', Terminal, 'Audit Logs'],
+                    ['/admin/operation-reports', AlertTriangle, 'Operation Reports'],
                   ].map(([to, Icon, label]) => (
 
                     <Link key={to} to={to} onClick={() => setMobileOpen(false)}

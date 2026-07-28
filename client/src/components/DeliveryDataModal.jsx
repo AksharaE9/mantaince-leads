@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import axios from '../api/axios.js';
 import SearchableOperatorSelect from './SearchableOperatorSelect.jsx';
 import CsvImportModal from './CsvImportModal.jsx';
+import { extractErrorMessage } from '../utils/errorMessage.js';
 
 const DELIVERY_DATA_ENDPOINTS = {
   schema: () => '/api/v1/delivery-data/schema',
@@ -83,11 +84,11 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
       onSaved?.();
       handleClose();
     } catch (err) {
-      const errors = err.response?.data?.errors;
-      if (errors?.length) {
-        setFieldErrors(errors);
+      const fields = err.response?.data?.error?.fields || err.response?.data?.errors;
+      if (fields?.length) {
+        setFieldErrors(fields);
       } else {
-        toast.error(err.response?.data?.error || 'Failed to save delivery data record');
+        toast.error(extractErrorMessage(err, 'Failed to save delivery data record'));
       }
     } finally {
       setSaving(false);
@@ -170,16 +171,16 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
               <input type="text" required className="w-full" value={form.businessName} onChange={set('businessName')} />
             </FormField>
             <FormField label="Area">
-              <input type="text" className="w-full" value={form.area} onChange={set('area')} />
+              <input type="text" placeholder="-" className="w-full" value={form.area} onChange={set('area')} />
             </FormField>
             <FormField label="City">
-              <input type="text" className="w-full" value={form.city} onChange={set('city')} />
+              <input type="text" placeholder="-" className="w-full" value={form.city} onChange={set('city')} />
             </FormField>
             <FormField label="Phone Number" required>
               <input type="text" required className="w-full" value={form.phoneNumber} onChange={set('phoneNumber')} />
             </FormField>
             <FormField label="Address">
-              <input type="text" className="w-full" value={form.address} onChange={set('address')} />
+              <input type="text" placeholder="-" className="w-full" value={form.address} onChange={set('address')} />
             </FormField>
             <FormField label="Appointment Date">
               <input type="date" className="w-full" value={form.appointmentDate} onChange={set('appointmentDate')} />

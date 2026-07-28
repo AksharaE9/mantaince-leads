@@ -7,6 +7,7 @@ import { PORT, CLIENT_URL } from './config/env.js';
 import pool, { connectDB } from './config/db.js';
 import performanceMonitor from './middleware/performance.js';
 import { timingMiddleware } from './middleware/timing.js';
+import { sendControllerError } from './utils/dbErrors.js';
 
 // Route imports
 import authRouter from './routes/auth.js';
@@ -261,77 +262,33 @@ app.get('/', (req, res) => {
 });
 
 // 5. Global Error Handling Middleware (Section 11 specifications)
+//
+// Routes through the same sendControllerError() every controller catch
+// block uses (server/src/utils/dbErrors.js) — this used to duplicate that
+// file's PG-error-code mapping independently (two implementations that
+// could silently drift), and never attached a correlationId. The three
+// cases below (file-size limit, malformed multipart, explicit 4xx) are
+// genuinely specific to this being a top-level Express error handler
+// (things a controller's own try/catch never sees) and stay here.
 app.use((err, req, res, next) => {
-  console.error('❌ Server Error Context:', err);
-
-  if (global.debugErrors) {
-    global.debugErrors.unshift({
-      timestamp: new Date().toISOString(),
-      type: 'unhandled_server_error',
-      message: err.message,
-      stack: err.stack,
-      code: err.code,
-      detail: err.detail
-    });
-    if (global.debugErrors.length > 50) global.debugErrors.pop();
-  }
-
-  // PostgreSQL Unique Violation (code 23505)
-  if (err.code === '23505') {
-    const detailMatch = err.detail?.match(/Key \((.*?)\)=\((.*?)\) already exists/);
-    const key = detailMatch ? detailMatch[1] : 'field';
-    return res.status(409).json({
-      success: false,
-      error: `Resource collision. Field '${key}' must be unique and already exists.`
-    });
-  }
-
-  // PostgreSQL Invalid Input Syntax (e.g. bad UUID format)
-  if (err.code === '22P02') {
-    return res.status(400).json({
-      success: false,
-      error: `Invalid resource identifier format`
-    });
-  }
-
   // Multer File Size Limit check
   if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({
-      success: false,
-      error: 'File upload size exceeds the maximum limit (10MB).'
-    });
+    return sendControllerError(res, err, 'globalErrorHandler', { status: 413, code: 'FILE_TOO_LARGE', message: 'File upload size exceeds the maximum limit (10MB).' });
   }
 
   // Malformed multipart body (e.g. missing/invalid boundary) — surfaces as a
   // plain busboy/multer error with no .status, not a genuine server fault.
   if (/multipart|boundary/i.test(err.message || '')) {
-    return res.status(400).json({
-      success: false,
-      error: 'Malformed file upload request — please try again.'
-    });
+    return sendControllerError(res, err, 'globalErrorHandler', { status: 400, code: 'MALFORMED_UPLOAD', message: 'Malformed file upload request — please try again.' });
   }
 
   // Explicit 4xx raised deliberately by route/middleware logic (e.g. multer
   // fileFilter rejections) — surface the real message, not a generic 500.
   if (err.status && err.status >= 400 && err.status < 500) {
-    return res.status(err.status).json({
-      success: false,
-      error: err.message || 'Invalid request'
-    });
+    return sendControllerError(res, err, 'globalErrorHandler', { status: err.status, code: 'REQUEST_REJECTED', message: err.message || 'Invalid request' });
   }
 
-  // Fallback internal error. Full stack/message is logged server-side above
-  // (console.error) regardless of environment; only non-production
-  // responses include it in the JSON body sent to the client.
-  const response = {
-    success: false,
-    error: 'An internal server error occurred during transaction processing.'
-  };
-  if (process.env.NODE_ENV !== 'production') {
-    response.details = err.stack || err.message;
-  }
-
-  return res.status(err.status || 500).json(response);
+  return sendControllerError(res, err, 'globalErrorHandler');
 });
 
 // Register Aurora DB-backed Import Worker Loop in the server process to ensure it runs concurrently

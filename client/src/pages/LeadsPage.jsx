@@ -35,6 +35,7 @@ import GeotagCapture from '../components/GeotagCapture.jsx';
 import VerticalSelectionBar from '../components/VerticalSelectionBar.jsx';
 import SearchableOperatorSelect from '../components/SearchableOperatorSelect.jsx';
 import CsvImportModal from '../components/CsvImportModal.jsx';
+import { extractErrorMessage } from '../utils/errorMessage.js';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
@@ -531,7 +532,7 @@ export const LeadsPage = () => {
       fetchLeads();
     } catch (err) {
       setLeads(previousLeads);
-      toast.error(err.response?.data?.error || 'Save failed.');
+      toast.error(extractErrorMessage(err, 'Save failed.'));
     }
   };
 
@@ -1137,6 +1138,7 @@ export const LeadsPage = () => {
                   <FormField label="Business Type">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'businessType')}
                       onChange={(event) => handleDynamicChange('businessType', event.target.value)}
                     />
@@ -1164,6 +1166,7 @@ export const LeadsPage = () => {
                   <FormField label="Point of Contact">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'pointOfContact')}
                       onChange={(event) => handleDynamicChange('pointOfContact', event.target.value)}
                     />
@@ -1171,6 +1174,7 @@ export const LeadsPage = () => {
                   <FormField label="Area">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'area')}
                       onChange={(event) => handleDynamicChange('area', event.target.value)}
                     />
@@ -1179,6 +1183,7 @@ export const LeadsPage = () => {
                   <FormField label="City">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'city')}
                       onChange={(event) => handleDynamicChange('city', event.target.value)}
                     />
@@ -1187,6 +1192,7 @@ export const LeadsPage = () => {
                   <FormField label="Link Address">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'deliveredLocation')}
                       onChange={(event) => handleDynamicChange('deliveredLocation', event.target.value)}
                     />
@@ -1195,6 +1201,7 @@ export const LeadsPage = () => {
                   <FormField label="Remarks">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'remarks')}
                       onChange={(event) => handleDynamicChange('remarks', event.target.value)}
                     />
@@ -1203,6 +1210,7 @@ export const LeadsPage = () => {
                   <FormField label="Recordings">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'recordings')}
                       onChange={(event) => handleDynamicChange('recordings', event.target.value)}
                     />
@@ -1230,6 +1238,7 @@ export const LeadsPage = () => {
                   <FormField label="Appointment time">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'appointmentTime')}
                       onChange={(event) => handleDynamicChange('appointmentTime', event.target.value)}
                     />
@@ -1238,6 +1247,7 @@ export const LeadsPage = () => {
                   <FormField label="Requirement order if any">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'requirement')}
                       onChange={(event) => handleDynamicChange('requirement', event.target.value)}
                     />
@@ -1246,6 +1256,7 @@ export const LeadsPage = () => {
                   <FormField label="Notes to the cos if any">
                     <input
                       type="text"
+                      placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'notes')}
                       onChange={(event) => handleDynamicChange('notes', event.target.value)}
                     />

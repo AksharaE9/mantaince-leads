@@ -5,6 +5,8 @@ import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { parseUploadBuffer } from '../services/spreadsheetParser.js';
 import { validateRawDataRow, getAssignableAgents, getKnownBusinessTypes } from '../services/rawDataImportSchema.js';
 import { bulkInsert } from '../db/bulkInsert.js';
+import { ErrorCodes } from '../utils/operationError.js';
+import { logger } from '../lib/logger.js';
 
 const BATCH_SIZE = 500;
 
@@ -65,6 +67,7 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
         failed_count: errorsArr.length,
         duplicate_count: duplicateCount,
         errors: errorsArr,
+        operation_type: 'bulk_upload',
     }, 3_600);
 }
 
@@ -91,7 +94,7 @@ export const processRawDataJob = async (job) => {
     try {
         const buffer = Buffer.from(fileBufferBase64, 'base64');
         const { rows, warnings: fileWarnings } = await parseUploadBuffer(buffer, fileExt);
-        for (const w of fileWarnings) errors.push({ row: 0, reason: w });
+        for (const w of fileWarnings) errors.push({ row: 0, code: 'FILE_WARNING', reason: w });
 
         totalRows = rows.length;
         await query('UPDATE csv_upload_logs SET total_rows = $1 WHERE id = $2', [totalRows, batchId]);
@@ -136,7 +139,7 @@ export const processRawDataJob = async (job) => {
 
             if (rowErrors.length > 0) {
                 const reason = rowErrors.map(e => e.message).join('; ');
-                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                errors.push({ row: rowNum, code: ErrorCodes.VALIDATION_FAILED, field: rowErrors.length === 1 ? rowErrors[0].field : undefined, reason, originalRow: rawRow });
                 rowOutcomes.push({ row: rowNum, status: 'failed', reason });
                 return;
             }
@@ -145,7 +148,7 @@ export const processRawDataJob = async (job) => {
             if (phoneSet.has(phone)) {
                 duplicateCount++;
                 const reason = 'Duplicate: contact number already exists';
-                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                errors.push({ row: rowNum, code: ErrorCodes.DUPLICATE_PHONE, field: 'phoneNumber', reason, originalRow: rawRow });
                 rowOutcomes.push({ row: rowNum, status: 'duplicate', reason });
                 return;
             }
@@ -195,10 +198,10 @@ export const processRawDataJob = async (job) => {
                         const reason = isDup ? 'Duplicate: contact number already exists' : rawErr.message;
                         if (isDup) {
                             duplicateCount++;
-                            errors.push({ row: r.csvRowNum, reason, originalRow: r.originalRow });
+                            errors.push({ row: r.csvRowNum, code: ErrorCodes.DUPLICATE_PHONE, field: 'phoneNumber', reason, originalRow: r.originalRow });
                             rowOutcomes.push({ row: r.csvRowNum, status: 'duplicate', reason });
                         } else {
-                            errors.push({ row: r.csvRowNum, reason: `Insert failed for ${r.business_name}: ${reason}`, originalRow: r.originalRow });
+                            errors.push({ row: r.csvRowNum, code: ErrorCodes.DB_CONSTRAINT, reason: `Insert failed for ${r.business_name}: ${reason}`, originalRow: r.originalRow });
                             rowOutcomes.push({ row: r.csvRowNum, status: 'failed', reason });
                         }
                     }
@@ -226,8 +229,8 @@ export const processRawDataJob = async (job) => {
 
         broadcastToAll({ type: 'RAW_DATA_MUTATED', verticalId, action: 'bulk_upload', batchId });
     } catch (error) {
-        console.error('❌ Raw Data Job Processing Failed:', error.message);
-        const failedErrors = errors.length > 0 ? errors : [{ row: 0, reason: error.message }];
+        logger.error({ correlationId: batchId, section: 'raw_data', operation: 'bulk_upload', verticalId, uploadedBy, err: { message: error.message, stack: error.stack } }, `[rawDataProcessor] job ${batchId} failed: ${error.message}`);
+        const failedErrors = errors.length > 0 ? errors : [{ row: 0, code: ErrorCodes.INTERNAL_ERROR, reason: error.message }];
         await query('UPDATE csv_upload_logs SET status = $1, errors = $2 WHERE id = $3', ['failed', JSON.stringify(failedErrors), batchId]);
         await emitProgress(batchId, uploadedBy, verticalId, 'failed', totalRows, successCount, failedErrors, duplicateCount).catch(() => {});
         throw error;

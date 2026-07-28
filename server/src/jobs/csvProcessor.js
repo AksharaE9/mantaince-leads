@@ -3,6 +3,8 @@ import crypto from 'crypto';
 import { invalidateOnLeadChange, cacheSet } from '../services/cache.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { parseUploadBuffer } from '../services/spreadsheetParser.js';
+import { ErrorCodes } from '../utils/operationError.js';
+import { logger } from '../lib/logger.js';
 
 // ── Batch sizing ───────────────────────────────────────────────────────────────
 // 1000 rows per INSERT: matches bulkInsert.js CHUNK_SIZE, halves round-trips vs. 500.
@@ -126,6 +128,7 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
         failed_count: errorsArr.length,
         duplicate_count: duplicateCount,
         errors: errorsArr,
+        operation_type: 'bulk_upload',
     }, 3_600);
 }
 
@@ -170,15 +173,15 @@ const processCsvJob = async (job) => {
         if (totalRows === 0) {
             await query(
                 "UPDATE csv_upload_logs SET status = 'done', errors = $2, processing_finished_at = NOW() WHERE id = $1",
-                [batchId, JSON.stringify(warnings.map(w => ({ row: 0, reason: w })))]
+                [batchId, JSON.stringify(warnings.map(w => ({ row: 0, code: 'FILE_WARNING', reason: w })))]
             );
-            await emitProgress(batchId, uploadedBy, verticalId, 'done', 0, 0, warnings.map(w => ({ row: 0, reason: w })), 0);
+            await emitProgress(batchId, uploadedBy, verticalId, 'done', 0, 0, warnings.map(w => ({ row: 0, code: 'FILE_WARNING', reason: w })), 0);
             return;
         }
 
         // Sheet/format warnings (e.g. "only the first sheet was used") ride along
         // as informational, non-fatal row-0 entries in the same errors array.
-        for (const w of warnings) errors.push({ row: 0, reason: w });
+        for (const w of warnings) errors.push({ row: 0, code: 'FILE_WARNING', reason: w });
 
         await emitProgress(batchId, uploadedBy, verticalId, 'processing', totalRows, 0, errors, 0);
 
@@ -252,14 +255,14 @@ const processCsvJob = async (job) => {
 
             if (!rawPhone) {
                 const reason = 'Missing contact number';
-                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                errors.push({ row: rowNum, code: ErrorCodes.MISSING_REQUIRED_FIELD, field: 'phone', reason, originalRow: rawRow });
                 rowOutcomes.push({ row: rowNum, status: 'failed', reason });
                 continue;
             }
 
             if (!rawName.trim()) {
                 const reason = 'Missing business / person / shop / company name';
-                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                errors.push({ row: rowNum, code: ErrorCodes.MISSING_REQUIRED_FIELD, field: 'name', reason, originalRow: rawRow });
                 rowOutcomes.push({ row: rowNum, status: 'failed', reason });
                 continue;
             }
@@ -267,7 +270,7 @@ const processCsvJob = async (job) => {
             if (phoneSet.has(rawPhone)) {
                 duplicateCount++;
                 const reason = 'Duplicate: contact number already exists';
-                errors.push({ row: rowNum, reason, originalRow: rawRow });
+                errors.push({ row: rowNum, code: ErrorCodes.DUPLICATE_PHONE, field: 'phone', reason, originalRow: rawRow });
                 rowOutcomes.push({ row: rowNum, status: 'duplicate', reason });
                 continue;
             }
@@ -373,13 +376,19 @@ const processCsvJob = async (job) => {
                         rowOutcomes.push({ row: lead.csvRowNum, status: 'success', id: lead.id });
                     } catch (singleErr) {
                         const isDup = singleErr.code === '23505';
+                        // Unlike a live inline API error (never leak raw driver
+                        // detail there), this `reason` lands only in the
+                        // permission-gated persisted report (csv_upload_logs.errors,
+                        // downloaded via streamFailedRows) — an admin/uploader
+                        // debugging a specific failed row benefits from the real
+                        // driver message here, same as this always did before.
                         const reason = isDup ? 'Duplicate: contact number already exists' : singleErr.message;
                         if (isDup) {
                             duplicateCount++;
-                            errors.push({ row: lead.csvRowNum, reason, originalRow: lead.originalRow });
+                            errors.push({ row: lead.csvRowNum, code: ErrorCodes.DUPLICATE_PHONE, field: 'phone', reason, originalRow: lead.originalRow });
                             rowOutcomes.push({ row: lead.csvRowNum, status: 'duplicate', reason });
                         } else {
-                            errors.push({ row: lead.csvRowNum, reason, originalRow: lead.originalRow });
+                            errors.push({ row: lead.csvRowNum, code: ErrorCodes.DB_CONSTRAINT, reason, originalRow: lead.originalRow });
                             rowOutcomes.push({ row: lead.csvRowNum, status: 'failed', reason });
                         }
                     }
@@ -425,8 +434,12 @@ const processCsvJob = async (job) => {
         await job.progress(100);
 
     } catch (error) {
-        console.error('❌ CSV Job Processing Failed:', error.message);
-        const failedErrors = errors && errors.length > 0 ? errors : [{ row: 0, reason: error.message }];
+        // batchId doubles as the correlationId — it's already the id the
+        // client polls/downloads a report by (see csv.js getCsvLogById /
+        // streamFailedRows), so a user reporting "batch <batchId> failed"
+        // is already handing over the exact key this log line is under.
+        logger.error({ correlationId: batchId, section: 'bulk_upload', operation: 'bulk_upload', verticalId, uploadedBy, err: { message: error.message, stack: error.stack } }, `[csvProcessor] job ${batchId} failed: ${error.message}`);
+        const failedErrors = errors && errors.length > 0 ? errors : [{ row: 0, code: ErrorCodes.INTERNAL_ERROR, reason: error.message }];
         await query(
             'UPDATE csv_upload_logs SET status = $1, errors = $2 WHERE id = $3',
             ['failed', JSON.stringify(failedErrors), batchId]
