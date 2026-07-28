@@ -10,7 +10,8 @@ import {
   updateCostConversionStatus, 
   assignCostConversion, 
   exportCostConversionsCsv,
-  uploadCostConversionPhoto
+  uploadCostConversionPhoto,
+  scanCosDuplicates
 } from '../controllers/costConversions.js';
 import {
   downloadCsvTemplate,
@@ -90,6 +91,10 @@ router.get('/', checkPermission(['leads:read', 'leads:read_own']), getCostConver
 router.post('/', checkPermission('leads:create'), createCostConversion);
 router.post('/bulk', checkPermission('leads:create'), createCostConversionBulk);
 router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exportCostConversionsCsv);
+// Literal route — must be registered before /:id, which would otherwise
+// shadow it (Express matches in registration order; see M6 elsewhere in
+// this codebase for the same class of bug).
+router.post('/duplicates/scan', checkPermission('leads:delete'), scanCosDuplicates);
 
 router.get('/:id', checkPermission(['leads:read', 'leads:read_own']), getCostConversionById);
 router.patch('/:id', checkPermission(['leads:update', 'leads:update_own']), updateCostConversion);

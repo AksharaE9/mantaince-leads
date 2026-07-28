@@ -108,7 +108,10 @@ export const getCostConversions = async (req, res) => {
         const sortCol  = ['createdAt', 'updatedAt', 'businessName', 'name', 'status'].includes(sortBy) ? SORT_COLUMN_MAP[sortBy] : 'l.created_at';
         // ── Build WHERE clauses dynamically ───────────────────────────────
         const params  = [verticalId];
-        const wheres  = ['l.vertical_id = $1', 'l.is_deleted = false'];
+        // Rows flagged 'duplicate_removed' by the Find & Remove Duplicates
+        // feature are soft-hidden from normal listing, same as is_deleted —
+        // but reversibly (see the duplicate_status column comment in db.js).
+        const wheres  = ['l.vertical_id = $1', 'l.is_deleted = false', "(l.duplicate_status IS NULL OR l.duplicate_status != 'duplicate_removed')"];
         let   pIdx    = 2;
 
         const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
@@ -1096,5 +1099,115 @@ export const createCostConversionBulk = async (req, res) => {
         });
     } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
+ * POST /api/v1/leads/duplicates/scan
+ *
+ * Find & Remove Duplicates (COS only — Positives/Raw Data/Delivery Data are
+ * independent sections, see the lead_type-scoped dedup fix elsewhere in this
+ * file). Groups active, unflagged COS records by phone number within the
+ * given scope; any group with more than one record is a duplicate group.
+ *
+ * Tiebreak rule: the EARLIEST-created record in each group is kept — the
+ * first record entered is treated as the authoritative one, and later
+ * uploads of the same phone number are the duplicates being cleaned up.
+ * This is a simple, deterministic, defensible default; there's no reliable
+ * generic way to measure "most complete" across this table's freeform JSONB
+ * `data` column, so completeness-based tiebreaking was not used.
+ *
+ * `dryRun` (default true) previews the operation with zero writes. Passing
+ * `dryRun: false` actually applies it: non-kept records in each group are
+ * soft-flagged (duplicate_status = 'duplicate_removed', duplicate_of_id =
+ * the kept record's id) — never hard-deleted, so this is fully reversible
+ * by clearing those columns. Flagged records are excluded from normal
+ * listing (see getCostConversions) and from promotion (see promoteToFollowUps).
+ */
+export const scanCosDuplicates = async (req, res) => {
+    try {
+        const { verticalId, agentId, dryRun = true } = req.body;
+
+        if (!isValidUUID(verticalId)) {
+            return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+        }
+        if (agentId && !isValidUUID(agentId)) {
+            return res.status(400).json({ success: false, error: 'agentId must be a valid UUID if provided' });
+        }
+        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+
+        const params = [verticalId];
+        const wheres = [
+            'vertical_id = $1', 'is_deleted = false', "lead_type != 'POSITIVE'",
+            'duplicate_status IS NULL', "phone IS NOT NULL", "phone != ''",
+        ];
+        let pIdx = 2;
+        if (agentId) {
+            wheres.push(`(uploaded_by = $${pIdx} OR assigned_to = $${pIdx})`);
+            params.push(agentId);
+            pIdx++;
+        }
+
+        const groupsRes = await query(`
+            SELECT phone,
+                   json_agg(json_build_object(
+                       'id', id, 'name', name, 'businessName', business_name, 'createdAt', created_at
+                   ) ORDER BY created_at ASC) AS records
+            FROM cost_conversions
+            WHERE ${wheres.join(' AND ')}
+            GROUP BY phone
+            HAVING COUNT(*) > 1
+            ORDER BY phone
+        `, params);
+
+        const groups = groupsRes.rows.map(r => {
+            const [kept, ...duplicates] = r.records;
+            return { phone: r.phone, kept, duplicates };
+        });
+        const totalFlagged = groups.reduce((sum, g) => sum + g.duplicates.length, 0);
+
+        if (dryRun) {
+            return res.status(200).json({
+                success: true,
+                data: { dryRun: true, groupsFound: groups.length, totalFlagged, groups },
+            });
+        }
+
+        for (const g of groups) {
+            const duplicateIds = g.duplicates.map(d => d.id);
+            if (duplicateIds.length === 0) continue;
+            await query(
+                `UPDATE cost_conversions
+                 SET duplicate_status = 'duplicate_removed', duplicate_of_id = $1,
+                     duplicate_flagged_at = NOW(), duplicate_flagged_by = $2
+                 WHERE id = ANY($3::uuid[])`,
+                [g.kept.id, req.user.sub, duplicateIds]
+            );
+        }
+
+        if (totalFlagged > 0) {
+            await logAudit(req, {
+                action: 'cost_conversion.duplicates_removed',
+                targetCollection: 'cost_conversions',
+                targetId: verticalId,
+                after: {
+                    groupsFound: groups.length,
+                    totalFlagged,
+                    groups: groups.map(g => ({ phone: g.phone, keptId: g.kept.id, duplicateIds: g.duplicates.map(d => d.id) })),
+                },
+                metadata: { agentId: agentId || null },
+            });
+            await invalidateOnLeadChange(verticalId, null);
+            broadcastToAll({ type: 'COST_CONVERSION_MUTATED', verticalId, action: 'duplicates_removed' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: { dryRun: false, groupsFound: groups.length, totalFlagged, groups },
+        });
+    } catch (error) {
+        return sendControllerError(res, error, 'scanCosDuplicates');
     }
 };

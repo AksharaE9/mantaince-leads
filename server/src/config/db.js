@@ -131,6 +131,9 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.tables
                 WHERE table_name = 'delivery_data'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cost_conversions' AND column_name = 'duplicate_status'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -506,6 +509,15 @@ const runMigrations = async () => {
         ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS geotag_address TEXT;
         ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS geotag_captured_at TIMESTAMP;
         ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS stage_id UUID REFERENCES cost_conversion_stages(id) ON DELETE SET NULL;
+
+        -- Soft duplicate-flagging (Find & Remove Duplicates feature). Reversible
+        -- by design: a flagged row is excluded from normal listing/promotion but
+        -- never hard-deleted, so a mistaken scan/apply can be undone by clearing
+        -- these columns rather than needing a restore-from-backup.
+        ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS duplicate_status VARCHAR(30);
+        ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS duplicate_of_id UUID REFERENCES cost_conversions(id) ON DELETE SET NULL;
+        ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS duplicate_flagged_at TIMESTAMP;
+        ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS duplicate_flagged_by UUID REFERENCES users(id) ON DELETE SET NULL;
 
         -- Migrate user_assignments from vertical_id to sub_vertical_id if vertical_id column exists
         DO $$
