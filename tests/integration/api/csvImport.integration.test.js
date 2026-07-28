@@ -189,11 +189,14 @@ describe('Bulk lead-import API (CSV/Excel) — regression coverage', () => {
       const adminRes = await query('SELECT password_hash FROM users WHERE email = $1', ['admin@gmail.com']);
       const adminHash = adminRes.rows[0].password_hash;
       
+      const agentRoleRes = await query("SELECT id FROM roles WHERE name = 'agent'");
+      const agentRoleId = agentRoleRes.rows[0].id;
+      
       agentUserId = '00000000-0000-0000-0000-999988887777';
       await query(`
         INSERT INTO users (id, name, email, password_hash, role_id, is_active, is_approved, vertical_access)
-        VALUES ($1, $2, $3, $4, '00000000-0000-0000-0000-000000000003', true, true, $5)
-      `, [agentUserId, 'Test Agent', 'agent-test@gmail.com', adminHash, [verticalId]]);
+        VALUES ($1, $2, $3, $4, $5, true, true, $6)
+      `, [agentUserId, 'Test Agent', 'agent-test@gmail.com', adminHash, agentRoleId, [verticalId]]);
 
       // Login as agent
       const loginRes = await request(app)

@@ -911,9 +911,23 @@ export const FollowUpsPositivesPage = () => {
           <button
             type="button"
             onClick={() => navigate('/leads')}
-            className="inline-flex items-center gap-2 px-4 py-2 border border-stone-300 hover:border-stone-500 text-[--text-secondary] bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+            className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
           >
-            <span>← COS</span>
+            <span>COS →</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/raw-data')}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+          >
+            <span>Raw Data →</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/delivery-data')}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+          >
+            <span>Delivery Data →</span>
           </button>
         </div>
 
@@ -971,10 +985,24 @@ export const FollowUpsPositivesPage = () => {
 
           <button 
             type="button"
-            onClick={() => navigate('/leads')}
-            className="flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg text-xs font-bold text-[--text-secondary] bg-white hover:bg-stone-50 shadow-sm transition-all"
+            onClick={() => navigate(`/leads?verticalId=${activeVertical?._id}`)}
+            className="flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg text-xs font-bold shadow-sm transition-all hover:bg-stone-50"
           >
-            <span>← COS</span>
+            <span>COS →</span>
+          </button>
+          <button 
+            type="button"
+            onClick={() => navigate(`/raw-data?verticalId=${activeVertical?._id}`)}
+            className="flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg text-xs font-bold shadow-sm transition-all hover:bg-stone-50"
+          >
+            <span>Raw Data →</span>
+          </button>
+          <button 
+            type="button"
+            onClick={() => navigate(`/delivery-data?verticalId=${activeVertical?._id}`)}
+            className="flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg text-xs font-bold shadow-sm transition-all hover:bg-stone-50"
+          >
+            <span>Delivery Data →</span>
           </button>
         </div>
       </div>
@@ -1028,13 +1056,22 @@ export const FollowUpsPositivesPage = () => {
                 Status
               </button>
               {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => setBulkDeleteDialog(true)}
-                  className="px-3 py-1.5 border border-red-200 text-red-500 rounded-md text-xs font-bold hover:bg-red-50 bg-white"
-                >
-                  Delete
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setBulkAssignModal(true)}
+                    className="px-3 py-1.5 border border-[--border-strong] rounded-md text-xs font-bold hover:bg-stone-100 bg-white"
+                  >
+                    Assign
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkDeleteDialog(true)}
+                    className="px-3 py-1.5 border border-red-200 text-red-500 rounded-md text-xs font-bold hover:bg-red-50 bg-white"
+                  >
+                    Delete
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -1743,6 +1780,46 @@ export const FollowUpsPositivesPage = () => {
               <button
                 type="button"
                 onClick={handleBulkStatusChange}
+                className="px-4 py-1.5 bg-[--accent] hover:bg-[--accent-hover] text-white font-black text-xs rounded-lg uppercase tracking-wider cursor-pointer"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Assign Dialog */}
+      {bulkAssignModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-4">
+          <div className="bg-white rounded-xl max-w-sm w-full p-5 space-y-4 shadow-xl">
+            <div className="border-b border-stone-200 pb-2.5">
+              <h4 className="text-sm font-black uppercase text-[--text-primary]">Bulk Assign Operator</h4>
+            </div>
+            <div className="space-y-3">
+              <span className="text-[10px] font-black uppercase text-stone-500">Select Operator</span>
+              <select
+                value={bulkAssignTarget}
+                onChange={(e) => setBulkAssignTarget(e.target.value)}
+                className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent] font-semibold"
+              >
+                <option value="">-- Unassigned --</option>
+                {agents.map(ag => (
+                  <option key={ag.id} value={ag.id}>{ag.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-stone-100">
+              <button
+                type="button"
+                onClick={() => setBulkAssignModal(false)}
+                className="px-3.5 py-1.5 border border-stone-300 text-xs font-bold rounded-lg hover:bg-stone-50 bg-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkAssign}
                 className="px-4 py-1.5 bg-[--accent] hover:bg-[--accent-hover] text-white font-black text-xs rounded-lg uppercase tracking-wider cursor-pointer"
               >
                 Confirm

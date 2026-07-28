@@ -34,7 +34,14 @@ export const FollowUpsPage = () => {
   // Local Filter scopes
   const [verticals, setVerticals] = useState([]);
   const [subVerticals, setSubVerticals] = useState([]);
-  const [selectedSubVerticalId, setSelectedSubVerticalId] = useState('');
+  
+  // Get/Set subVerticalId in searchParams
+  const selectedSubVerticalId = searchParams.get('subVerticalId') || '';
+  const setSelectedSubVerticalId = (id) => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set('subVerticalId', id); else next.delete('subVerticalId');
+    setSearchParams(next);
+  };
 
   // Stats dashboard state
   const [stats, setStats] = useState(null);
@@ -57,6 +64,7 @@ export const FollowUpsPage = () => {
   }, []);
 
   // Fetch sub-verticals when vertical changes
+  // Fetch sub-verticals when vertical changes
   useEffect(() => {
     const fetchSubVerticals = async () => {
       if (!activeVertical?._id) {
@@ -65,13 +73,21 @@ export const FollowUpsPage = () => {
       }
       try {
         const res = await axios.get(`/api/v1/verticals/${activeVertical._id}/sub-verticals`);
-        setSubVerticals(res.data.data || []);
+        const list = res.data.data || [];
+        setSubVerticals(list);
+        
+        // Only reset subVerticalId from URL if it's not present in the new vertical's sub-verticals
+        const urlSubId = searchParams.get('subVerticalId');
+        if (urlSubId && !list.some(sv => (sv._id || sv.id) === urlSubId)) {
+          const next = new URLSearchParams(searchParams);
+          next.delete('subVerticalId');
+          setSearchParams(next);
+        }
       } catch (err) {
         console.error('Failed to load sub-verticals', err);
       }
     };
     fetchSubVerticals();
-    setSelectedSubVerticalId(''); // reset sub-vertical
   }, [activeVertical]);
 
   // Fetch agents for the selected vertical

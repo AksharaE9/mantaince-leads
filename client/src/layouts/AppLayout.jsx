@@ -11,6 +11,7 @@ import { useUiStore } from '../store/uiStore.js';
 import axios from '../api/axios.js';
 import SidebarVerticalTree from '../components/SidebarVerticalTree.jsx';
 import { useRealtimeAssignments } from '../hooks/useRealtimeAssignments.js';
+import toast from 'react-hot-toast';
 
 export const AppLayout = () => {
   const { user, logout } = useAuthStore();
@@ -33,6 +34,11 @@ export const AppLayout = () => {
   const [profileOpen, setProfileOpen] = useState(false);
   const [loadingVerticals, setLoadingVerticals] = useState(true);
   const [buildInfo, setBuildInfo] = useState(null);
+
+  // Escalations state
+  const [escalationsOpen, setEscalationsOpen] = useState(false);
+  const [escalations, setEscalations] = useState([]);
+  const [loadingEscalations, setLoadingEscalations] = useState(false);
 
   useEffect(() => {
     axios.get('/health')
@@ -151,13 +157,98 @@ export const AppLayout = () => {
   const handleLogout = () => { logout(); navigate('/login'); };
   const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
 
+  // Scoped vertical/sub-vertical selection handlers
+  const handleSelectVertical = (vert) => {
+    const workspacePaths = [
+      '/leads',
+      '/follow-ups-positives',
+      '/raw-data',
+      '/delivery-data',
+      '/calendar',
+      '/follow-ups'
+    ];
+    const currentPath = location.pathname;
+    const isWorkspacePath = workspacePaths.some(p => currentPath.startsWith(p));
+    const targetPath = isWorkspacePath ? currentPath : '/leads';
+    navigate(`${targetPath}?verticalId=${vert._id}`);
+  };
+
+  const handleSelectSubVertical = (sub) => {
+    const workspacePaths = [
+      '/leads',
+      '/follow-ups-positives',
+      '/raw-data',
+      '/delivery-data',
+      '/calendar',
+      '/follow-ups'
+    ];
+    const currentPath = location.pathname;
+    const isWorkspacePath = workspacePaths.some(p => currentPath.startsWith(p));
+    const targetPath = isWorkspacePath ? currentPath : '/leads';
+    
+    let parentId = '';
+    for (const [vid, subs] of Object.entries(subVerticalsMap)) {
+      if (subs && subs.find(s => (s._id || s.id) === (sub._id || sub.id))) {
+        parentId = vid;
+        break;
+      }
+    }
+    const url = parentId 
+      ? `${targetPath}?verticalId=${parentId}&subVerticalId=${sub._id}`
+      : `${targetPath}?subVerticalId=${sub._id}`;
+    navigate(url);
+  };
+
+  // Escalations fetching/resolution handlers
+  const fetchEscalations = async () => {
+    if (!user || (user.role !== 'super_admin' && user.role !== 'vertical_admin')) return;
+    setLoadingEscalations(true);
+    try {
+      const res = await axios.get('/api/v1/admin/escalations/inbox?status=OPEN');
+      setEscalations(res.data.data || []);
+    } catch (err) {
+      console.error('Failed to load escalations inbox', err);
+    } finally {
+      setLoadingEscalations(false);
+    }
+  };
+
+  const handleResolveEscalation = async (escId, note) => {
+    try {
+      await axios.put(`/api/v1/escalations/${escId}/resolve`, { resolutionNote: note });
+      toast.success('Escalation resolved successfully');
+      fetchEscalations();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to resolve escalation');
+    }
+  };
+
+  const handleRejectEscalation = async (escId, note) => {
+    try {
+      await axios.put(`/api/v1/escalations/${escId}/reject`, { resolutionNote: note });
+      toast.success('Escalation rejected successfully');
+      fetchEscalations();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to reject escalation');
+    }
+  };
+
+  // Periodically fetch escalations if admin
+  useEffect(() => {
+    fetchEscalations();
+  }, [user]);
+
   const getBreadcrumbs = () => {
     const parts = location.pathname.split('/').filter(Boolean);
     if (!parts.length) return [{ label: 'Dashboard', path: '/' }];
-    return parts.map((p, i) => ({
-      label: p.charAt(0).toUpperCase() + p.slice(1).replace(/-/g, ' '),
-      path: '/' + parts.slice(0, i + 1).join('/')
-    }));
+    return parts.map((p, i) => {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p);
+      const label = isUuid ? p : p.charAt(0).toUpperCase() + p.slice(1).replace(/-/g, ' ');
+      return {
+        label,
+        path: '/' + parts.slice(0, i + 1).join('/')
+      };
+    });
   };
 
   const navLink = (to, Icon, label, exact = false) => {
@@ -239,7 +330,8 @@ export const AppLayout = () => {
               onEditVertical={isAdmin ? () => navigate('/admin/verticals') : undefined}
               onAddSubVertical={isAdmin ? () => navigate('/admin/verticals') : undefined}
               onExpandVertical={fetchSubVerticalsForVertical}
-              onSelectVertical={(vert) => navigate(`/leads?verticalId=${vert._id}`)}
+              onSelectVertical={handleSelectVertical}
+              onSelectSubVertical={handleSelectSubVertical}
               loading={loadingVerticals}
             />
           </div>
@@ -375,11 +467,20 @@ export const AppLayout = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            <button className="relative p-2 rounded-lg transition-all"
+            <button 
+              onClick={() => {
+                setEscalationsOpen(prev => !prev);
+                if (!escalationsOpen) fetchEscalations();
+              }}
+              className="relative p-2 rounded-lg transition-all"
               style={{ color: 'var(--text-muted)' }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-light)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
               <Bell size={18} />
+              {escalations.length > 0 && (
+                <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+              )}
             </button>
             <div className="relative">
               <button onClick={() => setProfileOpen(p => !p)}
@@ -433,6 +534,103 @@ export const AppLayout = () => {
           <Outlet />
         </main>
       </div>
+
+      {/* Escalations sliding drawer */}
+      {escalationsOpen && (
+        <div className="fixed inset-y-0 right-0 w-80 z-50 bg-white border-l shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="p-4 border-b flex justify-between items-center bg-stone-50">
+            <span className="text-xs font-black uppercase text-stone-500 tracking-wider">Open Escalations</span>
+            <button 
+              onClick={() => setEscalationsOpen(false)}
+              className="p-1 border rounded hover:bg-stone-100 text-stone-500 cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 font-sans">
+            {loadingEscalations ? (
+              <div className="text-center text-xs text-stone-400 py-8">Loading...</div>
+            ) : escalations.length === 0 ? (
+              <div className="text-center text-xs text-stone-400 py-8">No open escalations</div>
+            ) : (
+              escalations.map((esc) => (
+                <EscalationCard 
+                  key={esc.id} 
+                  escalation={esc} 
+                  onResolve={handleResolveEscalation}
+                  onReject={handleRejectEscalation}
+                />
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const EscalationCard = ({ escalation, onResolve, onReject }) => {
+  const [note, setNote] = useState('');
+  const [actionOpen, setActionOpen] = useState(false);
+
+  return (
+    <div className="border border-stone-200 rounded-lg p-3 bg-stone-50 space-y-2 text-xs">
+      <div className="flex justify-between items-start">
+        <span className="font-bold text-stone-800 truncate block max-w-[150px]">
+          {escalation.cost_conversion_business || escalation.cost_conversion_name}
+        </span>
+        <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-black uppercase">
+          Open
+        </span>
+      </div>
+      
+      <p className="text-stone-500 text-[11px]">
+        <strong className="text-stone-700">Reason:</strong> {escalation.reason}
+      </p>
+      
+      <div className="text-[10px] text-stone-400 flex justify-between">
+        <span>By: {escalation.escalated_by_name}</span>
+        <span>{new Date(escalation.created_at).toLocaleDateString()}</span>
+      </div>
+
+      {!actionOpen ? (
+        <div className="flex gap-2 pt-2">
+          <button 
+            type="button"
+            onClick={() => setActionOpen(true)}
+            className="flex-1 py-1 bg-[--accent] text-white font-bold rounded hover:bg-[--accent-hover] text-center cursor-pointer border-0"
+          >
+            Resolve
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2 pt-2 border-t">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Add resolution note..."
+            className="w-full border rounded p-1.5 text-xs focus:outline-none focus:border-[--accent]"
+            rows={2}
+          />
+          <div className="flex gap-2 font-bold">
+            <button 
+              type="button"
+              onClick={() => onResolve(escalation.id, note)}
+              className="flex-1 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-center cursor-pointer border-0 font-bold"
+            >
+              Confirm
+            </button>
+            <button 
+              type="button"
+              onClick={() => setActionOpen(false)}
+              className="px-2 py-1 border border-stone-300 rounded hover:bg-stone-100 text-center cursor-pointer bg-white"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

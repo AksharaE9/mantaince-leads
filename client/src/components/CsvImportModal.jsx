@@ -165,7 +165,7 @@ export default function CsvImportModal({
     formData.append('file', selectedFile);
     formData.append('verticalId', vertical._id);
     if (showSubVertical) formData.append('subVerticalId', subVerticalId);
-    if (leadTypeOptions) formData.append('leadType', currentLeadType);
+    formData.append('leadType', currentLeadType);
     if (showAssignOperator && assignTarget) formData.append('assignedTo', assignTarget);
 
     try {

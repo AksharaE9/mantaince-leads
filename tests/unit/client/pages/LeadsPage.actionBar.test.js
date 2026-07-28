@@ -36,11 +36,11 @@ describe('LeadsPage — Raw Data / Delivery Data are cross-links, not modals', (
     });
 
     it('renders a "Raw Data →" cross-link button matching the Positives & Follow-ups convention', () => {
-        expect(leadsPageSource).toMatch(/onClick=\{\(\) => navigate\('\/raw-data'\)\}[\s\S]{0,300}Raw Data/);
+        expect(leadsPageSource).toMatch(/onClick=\{\(\) => navigate\([`']\/raw-data\?verticalId=\$\{activeVertical\?\._id\}[`']\)\}[\s\S]{0,300}Raw Data/);
     });
 
     it('renders a "Delivery Data →" cross-link button matching the Positives & Follow-ups convention', () => {
-        expect(leadsPageSource).toMatch(/onClick=\{\(\) => navigate\('\/delivery-data'\)\}[\s\S]{0,300}Delivery Data/);
+        expect(leadsPageSource).toMatch(/onClick=\{\(\) => navigate\([`']\/delivery-data\?verticalId=\$\{activeVertical\?\._id\}[`']\)\}[\s\S]{0,300}Delivery Data/);
     });
 
     it('styles the Raw Data/Delivery Data cross-links identically to the existing Positives & Follow-ups cross-link (equally-weighted entry points)', () => {

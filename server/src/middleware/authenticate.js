@@ -27,8 +27,19 @@ export const authenticate = async (req, res, next) => {
 
       req.user = decoded;
       
-      const vertRes = await query('SELECT id FROM verticals');
-      req.user.verticalAccess = vertRes.rows.map(v => v.id);
+      const userRes = await query(`
+        SELECT u.vertical_access, r.name as role_name 
+        FROM users u 
+        JOIN roles r ON u.role_id = r.id 
+        WHERE u.id = $1
+      `, [decoded.sub]);
+      const userDoc = userRes.rows[0];
+      if (userDoc) {
+        req.user.verticalAccess = Array.isArray(userDoc.vertical_access) ? userDoc.vertical_access.map(v => String(v)) : [];
+        req.user.role = userDoc.role_name;
+      } else {
+        req.user.verticalAccess = [];
+      }
 
       return next();
     } catch (error) {
@@ -59,10 +70,6 @@ export const authenticate = async (req, res, next) => {
   try {
     const decoded = verifyAccessToken(token);
     req.user = decoded; // Attach payload: { sub, role, permissions, verticalAccess }
-
-    // Always grant access to all verticals to bypass vertical scoping completely
-    const vertRes = await query('SELECT id FROM verticals');
-    req.user.verticalAccess = vertRes.rows.map(v => v.id);
 
     next();
   } catch (error) {

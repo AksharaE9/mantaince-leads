@@ -111,6 +111,12 @@ export const getCostConversions = async (req, res) => {
         const wheres  = ['l.vertical_id = $1', 'l.is_deleted = false'];
         let   pIdx    = 2;
 
+        const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
+        if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
+            wheres.push(`l.assigned_to = $${pIdx++}`);
+            params.push(req.user.sub);
+        }
+
         if (subVerticalId && isValidUUID(subVerticalId)) {
             wheres.push(`l.sub_vertical_id = $${pIdx++}`);
             params.push(subVerticalId);
@@ -462,6 +468,11 @@ export const getCostConversionById = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
 
+        const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
+        if (!hasFullRead && req.role?.permissions.includes('leads:read_own') && lead.assigned_to !== req.user.sub) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
+        }
+
 
         return res.status(200).json({ success: true, data: lead });
     } catch (error) {
@@ -487,6 +498,11 @@ export const updateCostConversion = async (req, res) => {
 
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+
+        const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
+        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
         }
 
 
@@ -656,6 +672,11 @@ export const deleteCostConversion = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
 
+        const hasFullDelete = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:delete');
+        if (!hasFullDelete && req.role?.permissions.includes('leads:delete_own') && lead.assigned_to !== req.user.sub) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
+        }
+
 
         await query('UPDATE cost_conversions SET is_deleted = true, deleted_at = NOW(), deleted_by = $1 WHERE id = $2', [req.user.sub, id]);
 
@@ -687,6 +708,11 @@ export const updateCostConversionStatus = async (req, res) => {
 
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+
+        const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
+        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
         }
 
 
@@ -879,6 +905,11 @@ export const uploadCostConversionPhoto = async (req, res) => {
 
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(lead.vertical_id))) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+
+        const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
+        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
         }
 
 

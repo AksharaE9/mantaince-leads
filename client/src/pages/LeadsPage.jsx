@@ -859,21 +859,21 @@ export const LeadsPage = () => {
         <div className="flex flex-wrap gap-2 animate-none">
           <button
             type="button"
-            onClick={() => navigate('/follow-ups-positives')}
+            onClick={() => navigate(`/follow-ups-positives?verticalId=${activeVertical?._id}`)}
             className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
           >
             <span>Positives & Follow-ups →</span>
           </button>
           <button
             type="button"
-            onClick={() => navigate('/raw-data')}
+            onClick={() => navigate(`/raw-data?verticalId=${activeVertical?._id}`)}
             className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
           >
             <span>Raw Data →</span>
           </button>
           <button
             type="button"
-            onClick={() => navigate('/delivery-data')}
+            onClick={() => navigate(`/delivery-data?verticalId=${activeVertical?._id}`)}
             className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
           >
             <span>Delivery Data →</span>
@@ -1052,7 +1052,10 @@ export const LeadsPage = () => {
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setBulkStatusModal(true)} className="px-3 py-1.5 bg-black/10 hover:bg-black/20 rounded text-xs uppercase">Change Status</button>
               {isAdmin && (
-                <button onClick={() => setBulkDeleteDialog(true)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs uppercase">Delete</button>
+                <>
+                  <button onClick={() => setBulkAssignModal(true)} className="px-3 py-1.5 bg-black/10 hover:bg-black/20 rounded text-xs uppercase">Assign Operator</button>
+                  <button onClick={() => setBulkDeleteDialog(true)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs uppercase">Delete</button>
+                </>
               )}
             </div>
           </div>
@@ -1354,6 +1357,28 @@ export const LeadsPage = () => {
           <div className="flex justify-end gap-3 mt-6">
             <button onClick={() => setBulkStatusModal(false)} className="px-4 py-2 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-xs font-semibold text-[--text-secondary]">Cancel</button>
             <button onClick={handleBulkStatusChange} className="px-4 py-2 bg-[--accent] text-white font-bold rounded-lg text-xs hover:bg-[--accent-hover]">Apply</button>
+          </div>
+        </Modal>
+      )}
+
+      {bulkAssignModal && (
+        <Modal title="Bulk Assign Operator" onClose={() => setBulkAssignModal(false)}>
+          <p className="text-xs text-[--text-secondary] mb-4">Choose the operator to assign to all {selectedRowIds.length} checked leads.</p>
+          <FilterInput label="Select Operator">
+            <select 
+              value={bulkAssignTarget} 
+              onChange={(event) => setBulkAssignTarget(event.target.value)} 
+              className="bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-[--accent] w-full"
+            >
+              <option value="">-- Unassigned --</option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>{agent.name}</option>
+              ))}
+            </select>
+          </FilterInput>
+          <div className="flex justify-end gap-3 mt-6">
+            <button onClick={() => setBulkAssignModal(false)} className="px-4 py-2 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-xs font-semibold text-[--text-secondary]">Cancel</button>
+            <button onClick={handleBulkAssign} className="px-4 py-2 bg-[--accent] text-white font-bold rounded-lg text-xs hover:bg-[--accent-hover]">Assign</button>
           </div>
         </Modal>
       )}

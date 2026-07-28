@@ -423,7 +423,7 @@ export const register = async (req, res) => {
         FROM users u
         JOIN roles r ON u.role_id = r.id
         WHERE u.invite_token = $1 AND u.invite_token_expiry > NOW()
-      `, [token]);
+      `, [hashToken(token)]);
 
       const user = userRes.rows[0];
       if (!user) {

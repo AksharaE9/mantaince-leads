@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import axios from '../api/axios.js';
 import { useUiStore } from '../store/uiStore.js';
 import { useAuthStore } from '../store/authStore.js';
@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 export const CalendarPage = () => {
   const { user } = useAuthStore();
   const { activeVertical } = useUiStore();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -24,7 +25,14 @@ export const CalendarPage = () => {
 
   // Filters
   const [subVerticals, setSubVerticals] = useState([]);
-  const [selectedSubId, setSelectedSubId] = useState('');
+  
+  // Get/Set subVerticalId in searchParams
+  const selectedSubId = searchParams.get('subVerticalId') || '';
+  const setSelectedSubId = (id) => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set('subVerticalId', id); else next.delete('subVerticalId');
+    setSearchParams(next);
+  };
   const [agents, setAgents] = useState([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
@@ -51,8 +59,16 @@ export const CalendarPage = () => {
       if (!activeVertical) return;
       try {
         const res = await axios.get(`/api/v1/verticals/${activeVertical._id}/sub-verticals`);
-        setSubVerticals(res.data.data);
-        setSelectedSubId('');
+        const list = res.data.data || [];
+        setSubVerticals(list);
+        
+        // Only reset subVerticalId from URL if it's not present in the new vertical's sub-verticals
+        const urlSubId = searchParams.get('subVerticalId');
+        if (urlSubId && !list.some(sv => (sv._id || sv.id) === urlSubId)) {
+          const next = new URLSearchParams(searchParams);
+          next.delete('subVerticalId');
+          setSearchParams(next);
+        }
       } catch (err) {
         console.error('Failed to load sub-vertical filters', err);
       }

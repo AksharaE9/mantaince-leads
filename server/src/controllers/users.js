@@ -4,6 +4,7 @@ import { query } from '../config/db.js';
 import { logAudit } from '../services/audit.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { cacheDelete } from '../services/cache.js';
+import { hashToken } from '../utils/token.js';
 
 /**
  * GET /users
@@ -114,7 +115,7 @@ export const inviteUser = async (req, res) => {
       VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9)
       RETURNING id, name, email, role_id, vertical_access, is_active, is_approved, last_login_at, created_by, created_at, updated_at
     `, [
-      userId, name, email.toLowerCase(), passwordHash, roleDoc.id, verticalAccess, req.user.sub, inviteToken, inviteTokenExpiry
+      userId, name, email.toLowerCase(), passwordHash, roleDoc.id, verticalAccess, req.user.sub, hashToken(inviteToken), inviteTokenExpiry
     ]);
 
     const newUser = newUserRes.rows[0];

@@ -211,6 +211,42 @@ export default function DataSectionPage({ config }) {
           <p className="text-sm text-[--text-secondary] mt-1">{description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {location.pathname !== '/leads' && (
+            <button
+              type="button"
+              onClick={() => navigate(`/leads?verticalId=${activeVertical?._id}`)}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+            >
+              <span>COS →</span>
+            </button>
+          )}
+          {location.pathname !== '/follow-ups-positives' && (
+            <button
+              type="button"
+              onClick={() => navigate(`/follow-ups-positives?verticalId=${activeVertical?._id}`)}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+            >
+              <span>Positives & Follow-ups →</span>
+            </button>
+          )}
+          {location.pathname !== '/raw-data' && (
+            <button
+              type="button"
+              onClick={() => navigate(`/raw-data?verticalId=${activeVertical?._id}`)}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+            >
+              <span>Raw Data →</span>
+            </button>
+          )}
+          {location.pathname !== '/delivery-data' && (
+            <button
+              type="button"
+              onClick={() => navigate(`/delivery-data?verticalId=${activeVertical?._id}`)}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-emerald-300 hover:border-emerald-500 text-emerald-600 bg-white rounded-lg font-bold text-sm hover:bg-stone-50 shadow-sm transition-all"
+            >
+              <span>Delivery Data →</span>
+            </button>
+          )}
           <button type="button" onClick={() => setShowFilters((s) => !s)}
             className="inline-flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg hover:bg-stone-50 text-sm text-[--text-secondary] bg-white font-medium shadow-sm">
             <Filter size={16} /><span>Filters</span>

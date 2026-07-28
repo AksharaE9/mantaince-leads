@@ -18,6 +18,7 @@ const SidebarVerticalTree = ({
   onEditVertical,
   onExpandVertical,
   onSelectVertical,
+  onSelectSubVertical,
   loading = false,
 }) => {
   const [expandedVerticals, setExpandedVerticals] = useState({});
@@ -156,13 +157,16 @@ const SidebarVerticalTree = ({
               <div className="pl-5 py-0.5 space-y-0.5 ml-3 border-l"
                 style={{ borderColor: 'var(--border)' }}>
                 {subs.map(sub => (
-                  <Link
+                  <button
                     key={sub._id}
-                    to={`/leads?subVerticalId=${sub._id}`}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all"
+                    type="button"
+                    onClick={() => onSelectSubVertical && onSelectSubVertical(sub)}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all text-left"
                     style={{
                       color: activeSubVerticalId === sub._id ? 'var(--accent)' : 'var(--text-secondary)',
                       background: activeSubVerticalId === sub._id ? 'var(--accent-light)' : 'transparent',
+                      border: 'none',
+                      cursor: 'pointer'
                     }}
                     onMouseEnter={e => { if (activeSubVerticalId !== sub._id) { e.currentTarget.style.background = 'rgba(180,155,130,0.10)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
                     onMouseLeave={e => { if (activeSubVerticalId !== sub._id) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; } }}
@@ -170,7 +174,7 @@ const SidebarVerticalTree = ({
                     <div className="w-1.5 h-1.5 rounded-full shrink-0"
                       style={{ backgroundColor: activeSubVerticalId === sub._id ? 'var(--accent)' : 'var(--text-muted)' }} />
                     <span className="truncate">{sub.name}</span>
-                  </Link>
+                  </button>
                 ))}
               </div>
             </div>
