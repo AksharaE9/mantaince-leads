@@ -97,7 +97,7 @@ export const getCostConversions = async (req, res) => {
 
         // RBAC: non-super_admin must have access to this vertical
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical', debugUser: req.user });
         }
 
         const pageNum = parseInt(req.query.page, 10) || 1;

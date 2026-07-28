@@ -20,7 +20,7 @@ export const getFieldConfigs = async (req, res) => {
     }
     try {
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical', debugUser: req.user });
         }
 
         const configs = await withCache(CacheKeys.fieldConfigs(verticalId), TTL.FIELD_CONFIGS, async () => {
