@@ -353,7 +353,7 @@ export const AppLayout = () => {
               <div className="flex items-center gap-2 text-xs">
                 <span className="hidden lg:inline font-semibold" style={{ color: 'var(--text-muted)' }}>Workspace:</span>
                 <span className="px-3 py-1 rounded-full text-xs font-bold border animate-pulse-subtle"
-                  style={{ background: `${activeVertical?.color}18` || 'var(--accent-light)', color: activeVertical?.color || 'var(--accent)', borderColor: `${activeVertical?.color}30` || 'var(--accent-border)' }}>
+                  style={{ background: activeVertical?.color ? `${activeVertical.color}18` : 'var(--accent-light)', color: activeVertical?.color || 'var(--accent)', borderColor: activeVertical?.color ? `${activeVertical.color}30` : 'var(--accent-border)' }}>
                   {activeSubVertical.name}
                 </span>
                 <span className="font-medium hidden sm:inline" style={{ color: 'var(--text-muted)' }}>({activeVertical?.name})</span>
@@ -362,7 +362,7 @@ export const AppLayout = () => {
               <div className="flex items-center gap-2 text-xs">
                 <span className="hidden lg:inline font-semibold" style={{ color: 'var(--text-muted)' }}>Workspace:</span>
                 <span className="px-3 py-1 rounded-full text-xs font-bold border animate-pulse-subtle"
-                  style={{ background: `${activeVertical?.color}18` || 'var(--accent-light)', color: activeVertical?.color || 'var(--accent)', borderColor: `${activeVertical?.color}30` || 'var(--accent-border)' }}>
+                  style={{ background: activeVertical?.color ? `${activeVertical.color}18` : 'var(--accent-light)', color: activeVertical?.color || 'var(--accent)', borderColor: activeVertical?.color ? `${activeVertical.color}30` : 'var(--accent-border)' }}>
                   {activeVertical.name}
                 </span>
               </div>

@@ -33,7 +33,7 @@ export const DynamicFieldRenderer = ({ fields = [], mode = 'view', control, erro
         } catch {
           return <span>{String(raw)}</span>;
         }
-      case 'multiselect':
+      case 'multiselect': {
         const arr = Array.isArray(raw) ? raw : String(raw).split(',').map(s => s.trim());
         return (
           <div className="flex flex-wrap gap-1">
@@ -44,6 +44,7 @@ export const DynamicFieldRenderer = ({ fields = [], mode = 'view', control, erro
             ))}
           </div>
         );
+      }
       default:
         return <span>{String(raw)}</span>;
     }
@@ -111,7 +112,7 @@ export const DynamicFieldRenderer = ({ fields = [], mode = 'view', control, erro
                           ))}
                         </select>
                       );
-                    case 'multiselect':
+                    case 'multiselect': {
                       // Custom multi-select checkbox group
                       const activeValues = Array.isArray(field.value) ? field.value : [];
                       const handleCheckboxChange = (opt) => {
@@ -138,6 +139,7 @@ export const DynamicFieldRenderer = ({ fields = [], mode = 'view', control, erro
                           })}
                         </div>
                       );
+                    }
                     case 'boolean':
                       return (
                         <label className="flex items-center gap-2 cursor-pointer py-1.5 select-none">
@@ -150,7 +152,7 @@ export const DynamicFieldRenderer = ({ fields = [], mode = 'view', control, erro
                           <span className="text-sm text-[--text-primary]">{cfg.placeholder || 'Enable Option'}</span>
                         </label>
                       );
-                    case 'date':
+                    case 'date': {
                       // Format date value to yyyy-MM-dd for HTML input
                       let dateStr = field.value;
                       if (dateStr instanceof Date) {
@@ -170,6 +172,7 @@ export const DynamicFieldRenderer = ({ fields = [], mode = 'view', control, erro
                           onChange={(e) => field.onChange(e.target.value)}
                         />
                       );
+                    }
                     case 'number':
                       return (
                         <input

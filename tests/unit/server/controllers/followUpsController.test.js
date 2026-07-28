@@ -17,6 +17,24 @@ vi.mock('../../../../server/src/services/cache.js', () => ({
   cacheDeletePattern: vi.fn(),
 }));
 
+// logAudit fires a background query — stub it out entirely so unit tests
+// don't need a 3rd unmocked query call and don't touch the DB.
+vi.mock('../../../../server/src/services/audit.js', () => ({
+  logAudit: vi.fn().mockResolvedValue(undefined),
+}));
+
+// broadcastToAll sends SSE — no-op in unit tests.
+vi.mock('../../../../server/src/services/assignmentBroadcaster.js', () => ({
+  broadcastToAll: vi.fn(),
+  closeAllClients: vi.fn(),
+  initRealtimeListener: vi.fn(),
+}));
+
+// runInBackground is used inside logAudit — stub if imported transitively.
+vi.mock('../../../../server/src/utils/background.js', () => ({
+  runInBackground: vi.fn(),
+}));
+
 describe('followUpsController.createFollowUp', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -30,7 +48,8 @@ describe('followUpsController.createFollowUp', () => {
 
     const req = mockRequest({
       user: { sub: 'admin-1', role: 'super_admin' },
-      params: { leadId: 'lead-1' },
+      // Controller reads req.params.costConversionId — not leadId
+      params: { costConversionId: 'lead-1' },
       body: {
         assignedToId: 'agent-1',
         followUpDate: '2026-06-20T10:00:00.000Z',

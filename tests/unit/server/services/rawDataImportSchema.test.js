@@ -62,9 +62,18 @@ describe('resolveEmployeeName', () => {
         expect(result.error).toContain('No matching employee found');
     });
 
-    it('requires a non-empty name', () => {
-        expect(resolveEmployeeName('', AGENTS).error).toBe('Employee Name is required');
-        expect(resolveEmployeeName('   ', AGENTS).error).toBe('Employee Name is required');
+    it('returns null userId (no error) for an empty name — employee is optional during bulk upload', () => {
+        // Per CLAUDE.md: "make employeeName optional during bulk upload".
+        // resolveEmployeeName returns { userId: null } for empty/whitespace input
+        // rather than an error, because the caller (validateRawDataRow) treats
+        // a missing employee as a valid state (leads it to its own check).
+        const emptyResult = resolveEmployeeName('', AGENTS);
+        expect(emptyResult.userId).toBeNull();
+        expect(emptyResult.error).toBeUndefined();
+
+        const blankResult = resolveEmployeeName('   ', AGENTS);
+        expect(blankResult.userId).toBeNull();
+        expect(blankResult.error).toBeUndefined();
     });
 });
 
