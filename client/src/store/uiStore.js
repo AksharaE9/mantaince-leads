@@ -17,8 +17,19 @@ export const useUiStore = create((set) => ({
     set({ sidebarCollapsed: collapsed });
   },
 
-  setActiveVertical: (vertical) => set({ activeVertical: vertical }),
-  setActiveSubVertical: (subVertical) => set({ activeSubVertical: subVertical }),
+  // Normalize vertical objects: the server returns `id` (PG column name) but the
+  // entire client codebase accesses `._id`. Store both so all consumers work.
+  setActiveVertical: (vertical) => set({
+    activeVertical: vertical
+      ? { ...vertical, _id: vertical._id || vertical.id, id: vertical.id || vertical._id }
+      : null
+  }),
+  // Same normalization for sub-verticals which also have `id` from the DB.
+  setActiveSubVertical: (subVertical) => set({
+    activeSubVertical: subVertical
+      ? { ...subVertical, _id: subVertical._id || subVertical.id, id: subVertical.id || subVertical._id }
+      : null
+  }),
   setAssignedSubVerticals: (assignments) => set({ assignedSubVerticals: assignments }),
   
   leadsRefreshTrigger: 0,

@@ -65,7 +65,8 @@ export const AppLayout = () => {
       try {
         const { data } = await axios.get('/api/v1/verticals');
         if (cancelled) return;
-        const list = data.data;
+        // Normalize: server returns `id` (PG column) but client always accesses `._id`
+        const list = (data.data || []).map(v => ({ ...v, _id: v._id || v.id, id: v.id || v._id }));
         setVerticals(list);
         const subMap = {};
         list.forEach(v => { if (!['__proto__','constructor','prototype'].includes(v._id)) subMap[v._id] = undefined; });
@@ -121,7 +122,8 @@ export const AppLayout = () => {
     let foundSub = null, foundVert = null;
     for (const [vid, subs] of Object.entries(map)) {
       if (!subs) continue;
-      const s = subs.find(x => x._id === subId);
+      // subs may have `id` or `_id` from different fetch paths — check both
+      const s = subs.find(x => (x._id || x.id) === subId);
       if (s) { foundSub = s; foundVert = verts.find(v => v._id === vid) ?? null; break; }
     }
     if (foundSub) {
@@ -150,7 +152,9 @@ export const AppLayout = () => {
     if (!verticalId || ['__proto__','constructor','prototype'].includes(verticalId)) return;
     try {
       const { data } = await axios.get(`/api/v1/verticals/${verticalId}/sub-verticals`);
-      setSubVerticalsMap(prev => ({ ...prev, [verticalId]: data.data }));
+      // Normalize sub-verticals: add _id alias from id for consistent client access
+      const normalized = (data.data || []).map(s => ({ ...s, _id: s._id || s.id, id: s.id || s._id }));
+      setSubVerticalsMap(prev => ({ ...prev, [verticalId]: normalized }));
     } catch (e) { console.error(e); }
   }, []);
 
