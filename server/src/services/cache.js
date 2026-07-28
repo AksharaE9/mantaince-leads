@@ -1,72 +1,32 @@
 /**
- * Unified Cache Service
+ * Unified Cache Service — In-Process LRU Edition
  *
- * ┌───────────────────────────────────────────────────────────────────────┐
- * │  Uses Upstash Redis (REST API — works from Vercel serverless          │
- * │  functions without a persistent connection) when                     │
- * │  UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are set.           │
- * │  Falls back to a bounded in-process Map when they're not (local dev  │
- * │  without Upstash configured) or when NODE_ENV === 'test' (so the     │
- * │  unit suite never depends on a live network service).                │
- * │                                                                       │
- * │  This distinction matters in production: the in-process fallback is  │
- * │  NOT shared across Vercel serverless instances — cacheDelete/        │
- * │  cacheDeletePattern only clear the instance that handled the         │
- * │  request. Cross-instance invalidation (e.g. a revoked permission     │
- * │  taking effect immediately, not after up to 10 minutes) requires     │
- * │  the Redis path to actually be configured, which is why it's wired   │
- * │  up here rather than left as a documented-but-unused .env pair.      │
- * └───────────────────────────────────────────────────────────────────────┘
+ * ┌─────────────────────────────────────────────────────┐
+ * │  No Redis required. Uses a bounded in-process Map   │
+ * │  with TTL-aware expiry and LRU eviction.            │
+ * │                                                     │
+ * │  Max entries : 1 000 (configurable)                 │
+ * │  Key spaces  : csv_progress:*, field_configs:*,     │
+ * │                v1:leads:*, v1:reports:*,            │
+ * │                verticals:*, v1:vertical:*,          │
+ * │                v1:sv:vertical:*                     │
+ * └─────────────────────────────────────────────────────┘
+ *
+ * NOT shared across Vercel serverless instances — cacheDelete/
+ * cacheDeletePattern only clear the instance that handled the request.
+ * A previous pass wired this up to Upstash Redis for real cross-instance
+ * invalidation, but the credentials in .env point at an instance that no
+ * longer resolves (DNS ENOTFOUND) — reverted back to this in-process-only
+ * implementation rather than ship a cache backed by a dead endpoint.
+ * Re-introduce a real shared cache once a working Redis instance is
+ * provisioned; until then, a revoked permission can take up to
+ * CACHE_MAX_ENTRIES-bounded TTL (up to 10 minutes for attachRole's
+ * permission cache) to take effect on a different warm instance.
  */
-
-import { Redis } from '@upstash/redis';
 
 const MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES) || 1_000;
 
-const redisConfigured = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
-const useRedis = redisConfigured && process.env.NODE_ENV !== 'test';
-
-const redis = useRedis
-    ? new Redis({ url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN })
-    : null;
-
-if (!useRedis && process.env.NODE_ENV !== 'test') {
-    console.warn('[cache] UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN not set — falling back to in-process cache (NOT shared across serverless instances).');
-}
-
-// ── Redis health circuit breaker ────────────────────────────────────────────
-// A misconfigured/deleted Upstash instance (bad host, expired token) must not
-// turn into a per-request network timeout forever — that would silently add
-// multi-second latency to every request for the lifetime of the process
-// (confirmed empirically: an unreachable host added ~9s per request when
-// every cache call retried the failed lookup). Probe once per process
-// lifetime with a short deadline; on failure, latch to Map fallback for the
-// rest of this instance's life and never touch the network again.
-let redisHealthy = redis ? null : false; // null = unknown, true/false = decided
-let redisHealthCheck = null;
-const REDIS_PROBE_TIMEOUT_MS = 2_000;
-
-async function redisIsHealthy() {
-    if (redisHealthy !== null) return redisHealthy;
-    if (!redisHealthCheck) {
-        redisHealthCheck = (async () => {
-            try {
-                await Promise.race([
-                    redis.ping(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('probe timeout')), REDIS_PROBE_TIMEOUT_MS)),
-                ]);
-                redisHealthy = true;
-            } catch (err) {
-                redisHealthy = false;
-                console.error(`[cache] Upstash Redis unreachable (${err.message}) — falling back to in-process cache for the rest of this instance's lifetime.`);
-            }
-            return redisHealthy;
-        })();
-    }
-    return redisHealthCheck;
-}
-
-// ── In-process fallback store ───────────────────────────────────────────────
+// ── Internal LRU Store ────────────────────────────────────────────────────────
 // We use a plain Map, which preserves insertion order in V8.
 // On every SET we evict the oldest entry if we're over MAX_ENTRIES.
 
@@ -87,9 +47,7 @@ function _lruEvict() {
     }
 }
 
-// Run expiry sweep every 60 s to prevent unbounded growth (fallback path only —
-// harmless no-op when Redis is healthy and the Map stays empty; started
-// unconditionally since Redis health isn't known synchronously at load time).
+// Run expiry sweep every 60 s to prevent unbounded growth
 setInterval(_evictExpired, 60_000).unref();
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -100,15 +58,6 @@ setInterval(_evictExpired, 60_000).unref();
  */
 export async function cacheGet(key) {
     if (!key) return null;
-    if (redis && await redisIsHealthy()) {
-        try {
-            const value = await redis.get(key);
-            return value === null || value === undefined ? null : value;
-        } catch (err) {
-            console.error('[cache] redis get failed, treating as miss:', err.message);
-            return null;
-        }
-    }
     const entry = store.get(key);
     if (!entry) return null;
     if (Date.now() > entry.expiry) {
@@ -126,14 +75,6 @@ export async function cacheGet(key) {
  */
 export async function cacheSet(key, value, ttlSeconds) {
     if (!key) return;
-    if (redis && await redisIsHealthy()) {
-        try {
-            await redis.set(key, value, { ex: ttlSeconds });
-        } catch (err) {
-            console.error('[cache] redis set failed:', err.message);
-        }
-        return;
-    }
     _lruEvict();
     store.set(key, {
         value,
@@ -145,17 +86,9 @@ export async function cacheSet(key, value, ttlSeconds) {
  * Delete one or more specific keys.
  */
 export async function cacheDelete(...keys) {
-    const valid = keys.filter(Boolean);
-    if (!valid.length) return;
-    if (redis && await redisIsHealthy()) {
-        try {
-            await redis.del(...valid);
-        } catch (err) {
-            console.error('[cache] redis del failed:', err.message);
-        }
-        return;
+    for (const key of keys) {
+        if (key) store.delete(key);
     }
-    for (const key of valid) store.delete(key);
 }
 
 /**
@@ -165,21 +98,6 @@ export async function cacheDeletePattern(prefix) {
     if (!prefix) return;
     // Strip trailing '*' wildcard if present (our patterns use '*' suffix)
     const cleanPrefix = prefix.endsWith('*') ? prefix.slice(0, -1) : prefix;
-    if (redis && await redisIsHealthy()) {
-        try {
-            let cursor = 0;
-            const matched = [];
-            do {
-                const [nextCursor, keys] = await redis.scan(cursor, { match: `${cleanPrefix}*`, count: 200 });
-                matched.push(...keys);
-                cursor = Number(nextCursor);
-            } while (cursor !== 0);
-            if (matched.length) await redis.del(...matched);
-        } catch (err) {
-            console.error('[cache] redis scan/del failed:', err.message);
-        }
-        return;
-    }
     for (const key of store.keys()) {
         if (key.startsWith(cleanPrefix)) store.delete(key);
     }
@@ -239,15 +157,6 @@ export async function invalidateOnTaxonomyChange(verticalId) {
 /**
  * Flush entire cache (testing / emergency use only).
  */
-export async function flushL1Cache() {
-    if (redis && await redisIsHealthy()) {
-        try {
-            await redis.flushdb();
-        } catch (err) {
-            console.error('[cache] redis flushdb failed:', err.message);
-        }
-    }
-    // Always clear the local fallback store too, in case any entries were
-    // written to it during the brief window before the health probe settled.
+export function flushL1Cache() {
     store.clear();
 }

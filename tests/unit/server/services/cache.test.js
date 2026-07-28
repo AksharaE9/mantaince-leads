@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { cacheGet, cacheSet, cacheDelete, cacheDeletePattern, withCache, flushL1Cache } from '../../../../server/src/services/cache.js';
 
 describe('cache service (In-Process LRU Edition)', () => {
-  beforeEach(async () => {
-    await flushL1Cache();
+  beforeEach(() => {
+    flushL1Cache();
   });
 
   it('caches standard query keys', async () => {
