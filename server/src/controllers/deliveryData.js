@@ -226,7 +226,7 @@ export const createDeliveryData = async (req, res) => {
             row.date || null, row.businessType || null, row.businessName,
             row.area || null, row.city || null, phone, row.address || null,
             row.appointmentDate || null, row.appointmentTimings || null,
-            row.remarks || null, row.deliveryDate, row.deliveryTime,
+            row.remarks || null, row.deliveryDate || null, row.deliveryTime || null,
             linkResult.linkedRawDataId, req.user.sub,
         ]);
 

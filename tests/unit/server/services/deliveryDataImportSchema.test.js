@@ -20,11 +20,11 @@ describe('DELIVERY_DATA_FIELDS', () => {
         ]);
     });
 
-    it('marks Delivery Date and Delivery Time as required', () => {
+    it('marks Delivery Date and Delivery Time as optional', () => {
         const deliveryDate = DELIVERY_DATA_FIELDS.find(f => f.key === 'deliveryDate');
         const deliveryTime = DELIVERY_DATA_FIELDS.find(f => f.key === 'deliveryTime');
-        expect(deliveryDate.required).toBe(true);
-        expect(deliveryTime.required).toBe(true);
+        expect(deliveryDate.required).toBe(false);
+        expect(deliveryTime.required).toBe(false);
         expect(deliveryDate.type).toBe('date');
     });
 
@@ -67,9 +67,9 @@ describe('validateDeliveryDataRow', () => {
         expect(fields).toContain('employeeName');
     });
 
-    it('requires Delivery Date', () => {
+    it('does not require Delivery Date', () => {
         const { errors } = validateDeliveryDataRow({ ...baseRow, deliveryDate: '' }, ctx);
-        expect(errors).toContainEqual({ field: 'deliveryDate', message: 'Delivery Date is required' });
+        expect(errors.some(e => e.field === 'deliveryDate')).toBe(false);
     });
 
     it('rejects an unparseable Delivery Date', () => {
@@ -77,9 +77,9 @@ describe('validateDeliveryDataRow', () => {
         expect(errors.some(e => e.field === 'deliveryDate')).toBe(true);
     });
 
-    it('requires Delivery Time', () => {
+    it('does not require Delivery Time', () => {
         const { errors } = validateDeliveryDataRow({ ...baseRow, deliveryTime: '' }, ctx);
-        expect(errors).toContainEqual({ field: 'deliveryTime', message: 'Delivery Time is required' });
+        expect(errors.some(e => e.field === 'deliveryTime')).toBe(false);
     });
 
     it('accepts a Delivery Time range string, same free-text convention as Appointment Timings', () => {

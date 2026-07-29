@@ -32,8 +32,8 @@ import {
  */
 export const DELIVERY_DATA_FIELDS = [
     ...RAW_DATA_FIELDS,
-    { key: 'deliveryDate', label: 'Delivery Date', csvHeader: 'Delivery Date', type: 'date', required: true },
-    { key: 'deliveryTime', label: 'Delivery Time', csvHeader: 'Delivery Time', type: 'string', required: true, maxLength: 100 },
+    { key: 'deliveryDate', label: 'Delivery Date', csvHeader: 'Delivery Date', type: 'date', required: false },
+    { key: 'deliveryTime', label: 'Delivery Time', csvHeader: 'Delivery Time', type: 'string', required: false, maxLength: 100 },
 ];
 
 export async function getKnownBusinessTypes(verticalId) {
@@ -61,17 +61,13 @@ export function validateDeliveryDataRow(row, { agents, knownBusinessTypes }) {
 
     const deliveryDateRaw = row.deliveryDate;
     const deliveryDateValue = deliveryDateRaw === undefined || deliveryDateRaw === null ? '' : String(deliveryDateRaw).trim();
-    if (!deliveryDateValue) {
-        errors.push({ field: 'deliveryDate', message: 'Delivery Date is required' });
-    } else if (!parseFlexibleDate(deliveryDateValue)) {
+    if (deliveryDateValue && !parseFlexibleDate(deliveryDateValue)) {
         errors.push({ field: 'deliveryDate', message: 'Delivery Date is not a valid date' });
     }
 
     const deliveryTimeRaw = row.deliveryTime;
     const deliveryTimeValue = deliveryTimeRaw === undefined || deliveryTimeRaw === null ? '' : String(deliveryTimeRaw).trim();
-    if (!deliveryTimeValue) {
-        errors.push({ field: 'deliveryTime', message: 'Delivery Time is required' });
-    } else if (deliveryTimeValue.length > 100) {
+    if (deliveryTimeValue && deliveryTimeValue.length > 100) {
         errors.push({ field: 'deliveryTime', message: 'Delivery Time exceeds 100 characters' });
     }
 

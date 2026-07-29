@@ -143,6 +143,9 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'csv_upload_logs' AND column_name = 'operation_type'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'delivery_data' AND column_name = 'delivery_date' AND is_nullable = 'YES'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -618,8 +621,8 @@ const runMigrations = async () => {
             appointment_date DATE,
             appointment_timings VARCHAR(100),
             remarks TEXT,
-            delivery_date DATE NOT NULL,
-            delivery_time VARCHAR(100) NOT NULL,
+            delivery_date DATE,
+            delivery_time VARCHAR(100),
             linked_raw_data_id UUID REFERENCES raw_data(id) ON DELETE SET NULL,
             source VARCHAR(20) NOT NULL DEFAULT 'single_add',
             csv_batch_id UUID REFERENCES csv_upload_logs(id) ON DELETE SET NULL,
@@ -631,6 +634,10 @@ const runMigrations = async () => {
         CREATE INDEX IF NOT EXISTS idx_delivery_data_vertical ON delivery_data(vertical_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_delivery_data_phone ON delivery_data(vertical_id, phone_number);
         CREATE INDEX IF NOT EXISTS idx_delivery_data_linked_raw_data ON delivery_data(linked_raw_data_id);
+
+        -- Make delivery date & delivery time optional on existing tables
+        ALTER TABLE delivery_data ALTER COLUMN delivery_date DROP NOT NULL;
+        ALTER TABLE delivery_data ALTER COLUMN delivery_time DROP NOT NULL;
 
         -- Real-time sync change log, polled by clients (replaces SSE — Vercel's
         -- legacy builds/routes @vercel/node config never actually streams

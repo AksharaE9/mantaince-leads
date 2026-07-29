@@ -188,11 +188,11 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
             <FormField label="Appointment Timings">
               <input type="text" placeholder="e.g. 10:00 AM - 11:00 AM" className="w-full" value={form.appointmentTimings} onChange={set('appointmentTimings')} />
             </FormField>
-            <FormField label="Delivery Date" required>
-              <input type="date" required className="w-full" value={form.deliveryDate} onChange={set('deliveryDate')} />
+            <FormField label="Delivery Date">
+              <input type="date" className="w-full" value={form.deliveryDate} onChange={set('deliveryDate')} />
             </FormField>
-            <FormField label="Delivery Time" required>
-              <input type="text" required placeholder="e.g. 2:00 PM - 3:00 PM" className="w-full" value={form.deliveryTime} onChange={set('deliveryTime')} />
+            <FormField label="Delivery Time">
+              <input type="text" placeholder="e.g. 2:00 PM - 3:00 PM" className="w-full" value={form.deliveryTime} onChange={set('deliveryTime')} />
             </FormField>
           </div>
           <FormField label="Remarks">

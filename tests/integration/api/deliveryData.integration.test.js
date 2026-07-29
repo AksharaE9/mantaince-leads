@@ -209,7 +209,7 @@ describe('Delivery Data API', () => {
             expect(res.body.data.delivery_time).toBe('2:00 PM - 3:00 PM');
         });
 
-        it('rejects with structured errors (422) when Delivery Date/Delivery Time are missing — never a bare 500', async () => {
+        it('succeeds (201) when Delivery Date/Delivery Time are missing — they are optional now', async () => {
             const res = await request(app)
                 .post('/api/v1/delivery-data')
                 .set('Authorization', `Bearer ${adminToken}`)
@@ -217,11 +217,10 @@ describe('Delivery Data API', () => {
                     verticalId, date: '2026-07-24', employeeName: 'Super Admin',
                     businessName: 'Acme Traders', phoneNumber: '9876500002',
                 })
-                .expect(422);
-            expect(res.body.success).toBe(false);
-            const fields = res.body.errors.map(e => e.field);
-            expect(fields).toContain('deliveryDate');
-            expect(fields).toContain('deliveryTime');
+                .expect(201);
+            expect(res.body.success).toBe(true);
+            expect(res.body.data.delivery_date).toBeNull();
+            expect(res.body.data.delivery_time).toBeNull();
         });
 
         it('allows two Delivery Data rows with the same phone number — unlike Raw Data, this is an event log, not a hard reject', async () => {

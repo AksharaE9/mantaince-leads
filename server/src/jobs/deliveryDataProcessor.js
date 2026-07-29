@@ -205,7 +205,7 @@ export const processDeliveryDataJob = async (job) => {
                 appointment_timings: row.appointmentTimings || null,
                 remarks: row.remarks || null,
                 delivery_date: toDateOrNull(row.deliveryDate),
-                delivery_time: row.deliveryTime,
+                delivery_time: row.deliveryTime || null,
                 linked_raw_data_id: linkResult.linkedRawDataId,
                 source: 'bulk_upload',
                 csv_batch_id: batchId,
