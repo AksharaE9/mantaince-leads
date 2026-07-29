@@ -382,29 +382,74 @@ export const streamFailedRows = async (req, res) => {
 
         if (errors.length === 0) return res.status(400).json({ success: false, error: 'No errors found' });
 
-        let csvContent = '';
-        const firstError = errors.find(e => e.originalRow && typeof e.originalRow === 'object');
-        if (firstError) {
-            const originalHeaders = Object.keys(firstError.originalRow);
-            const csvHeader = [...originalHeaders, 'ERROR REASON'].map(h => `"${sanitizeCsvValue(h).replace(/"/g, '""')}"`).join(',') + '\n';
-            const csvRows = errors.map(e => {
-                const rowData = e.originalRow || {};
-                const values = originalHeaders.map(h => {
-                    const val = rowData[h] === undefined || rowData[h] === null ? '' : rowData[h].toString();
-                    return `"${sanitizeCsvValue(val).replace(/"/g, '""')}"`;
-                });
-                values.push(`"${sanitizeCsvValue(e.reason || '').replace(/"/g, '""')}"`);
-                return values.join(',');
-            }).join('\n');
-            csvContent = csvHeader + csvRows + '\n';
-        } else {
-            const csvHeader = 'Row,Reason\n';
-            const csvRows = errors.map(e => `"${sanitizeCsvValue(e.row).replace(/"/g, '""')}","${sanitizeCsvValue(e.reason || '').replace(/"/g, '""')}"`).join('\n');
-            csvContent = csvHeader + csvRows + '\n';
-        }
+        // Helper to extract Business Name from originalRow
+        const extractBusinessName = (originalRow) => {
+            if (!originalRow || typeof originalRow !== 'object') return '';
+            const keys = Object.keys(originalRow);
+            const normalizedKeys = keys.map(k => k.toLowerCase().trim().replace(/\r?\n/g, ' ').replace(/\s+/g, ' '));
+            
+            const matchKeys = [
+                'business name',
+                'business/person/shop/company name',
+                'business person, shop, and company name',
+                'business',
+                'name'
+            ];
+            for (const mk of matchKeys) {
+                const idx = normalizedKeys.indexOf(mk);
+                if (idx !== -1) return originalRow[keys[idx]];
+            }
+            // Fallback: look for keys containing 'business' or 'name'
+            for (let i = 0; i < keys.length; i++) {
+                const k = normalizedKeys[i];
+                if (k.includes('business') || k.includes('name')) {
+                    return originalRow[keys[i]];
+                }
+            }
+            return '';
+        };
+
+        // Helper to extract Phone Number from originalRow
+        const extractPhoneNumber = (originalRow) => {
+            if (!originalRow || typeof originalRow !== 'object') return '';
+            const keys = Object.keys(originalRow);
+            const normalizedKeys = keys.map(k => k.toLowerCase().trim().replace(/\r?\n/g, ' ').replace(/\s+/g, ' '));
+            
+            const matchKeys = [
+                'contact number',
+                'phone number',
+                'contact',
+                'contact no',
+                'number',
+                'phone',
+                'mobile'
+            ];
+            for (const mk of matchKeys) {
+                const idx = normalizedKeys.indexOf(mk);
+                if (idx !== -1) return originalRow[keys[idx]];
+            }
+            // Fallback: look for keys containing 'phone', 'contact', 'mobile', or 'number'
+            for (let i = 0; i < keys.length; i++) {
+                const k = normalizedKeys[i];
+                if (k.includes('phone') || k.includes('contact') || k.includes('mobile') || k.includes('number')) {
+                    return originalRow[keys[i]];
+                }
+            }
+            return '';
+        };
+
+        const csvHeader = 'Business Name,Phone Number,Reason for Failure\n';
+        const csvRows = errors.map(e => {
+            const bizName = extractBusinessName(e.originalRow);
+            const phone = extractPhoneNumber(e.originalRow);
+            const reason = e.reason || '';
+            return `"${sanitizeCsvValue(bizName).replace(/"/g, '""')}","${sanitizeCsvValue(phone).replace(/"/g, '""')}","${sanitizeCsvValue(reason).replace(/"/g, '""')}"`;
+        }).join('\n');
+
+        const csvContent = csvHeader + csvRows + '\n';
 
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename=error-report-${batchId}.csv`);
+        res.setHeader('Content-Disposition', `attachment; filename=failed-records-${batchId}.csv`);
         return res.status(200).send(csvContent);
     } catch (error) {
         return sendControllerError(res, error, 'streamFailedRows');

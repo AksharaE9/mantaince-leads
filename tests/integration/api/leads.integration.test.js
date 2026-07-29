@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
+import crypto from 'crypto';
 import app from '../../../server/src/app.js';
 import { query } from '../../../server/src/config/db.js';
 
@@ -44,6 +45,54 @@ describe('CostConversions API Integration', () => {
 
       const elapsed = Date.now() - start;
       expect(elapsed).toBeLessThan(1500); // Generous buffer for test dev execution   
+    });
+
+    describe('GET /api/v1/cost-conversions/export/csv', () => {
+      it('exports a CSV of cost conversions for authorized user', async () => {
+        const res = await request(app)
+          .get('/api/v1/cost-conversions/export/csv?verticalId=0f26e60c-09fe-43e3-83c6-b8ece895d365')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(200);
+
+        expect(res.header['content-type']).toContain('text/csv');
+      });
+    });
+  });
+
+  describe('Follow-up CSV Export API', () => {
+    describe('GET /api/v1/followUps/verticals/:verticalId/follow-ups/export/csv', () => {
+      it('exports a CSV of follow ups for authorized user', async () => {
+        const res = await request(app)
+          .get('/api/v1/followUps/verticals/0f26e60c-09fe-43e3-83c6-b8ece895d365/follow-ups/export/csv')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(200);
+
+        expect(res.header['content-type']).toContain('text/csv');
+        expect(res.text).toContain('FOLLOW-UP DATE & TIME');
+      });
+
+      it('returns 403 for unauthorized vertical access', async () => {
+        const adminRes = await query('SELECT password_hash FROM users WHERE email = $1', ['admin@gmail.com']);
+        const adminHash = adminRes.rows[0].password_hash;
+        const agentRoleId = (await query("SELECT id FROM roles WHERE name = 'agent'")).rows[0].id;
+        const agentUserId = crypto.randomUUID();
+        const agentEmail = `agent-${crypto.randomUUID()}@gmail.com`;
+        
+        await query(`
+          INSERT INTO users (id, name, email, password_hash, role_id, vertical_access, is_active, is_approved)
+          VALUES ($1, $2, $3, $4, $5, $6, true, true)
+        `, [agentUserId, 'Test Agent', agentEmail, adminHash, agentRoleId, []]);
+
+        const agentLogin = await request(app)
+          .post('/api/v1/auth/login')
+          .send({ email: agentEmail, password: 'admin123' });
+        const agentToken = agentLogin.body.data.accessToken;
+
+        await request(app)
+          .get('/api/v1/followUps/verticals/0f26e60c-09fe-43e3-83c6-b8ece895d365/follow-ups/export/csv')
+          .set('Authorization', `Bearer ${agentToken}`)
+          .expect(403);
+      });
     });
   });
 });

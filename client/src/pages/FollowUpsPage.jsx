@@ -224,6 +224,36 @@ export const FollowUpsPage = () => {
     }
   };
 
+  const handleCsvExport = async () => {
+    if (!activeVertical) return;
+    try {
+      const qParams = new URLSearchParams({
+        date: dateStr
+      });
+      if (selectedSubVerticalId) qParams.set('subVerticalId', selectedSubVerticalId);
+      if (agentId) qParams.set('assignedTo', agentId);
+      if (status) qParams.set('status', status);
+
+      const response = await axios.get(
+        `/api/v1/followUps/verticals/${activeVertical._id}/follow-ups/export/csv?${qParams.toString()}`,
+        { responseType: 'blob' }
+      );
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `follow-ups-export-${activeVertical.slug}-${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success('Follow-ups exported successfully!');
+    } catch (err) {
+      console.error('Export failed:', err);
+      toast.error('Failed to export follow-ups');
+    }
+  };
+
   const filteredFollowUps = followUps.filter(f => status === 'ALL' || f.status === status);
 
   return (
@@ -242,6 +272,15 @@ export const FollowUpsPage = () => {
         </div>
 
         <div className="flex gap-2.5">
+          {activeVertical && (
+            <button 
+              onClick={handleCsvExport}
+              className="flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg text-xs font-bold text-[--text-secondary] bg-white hover:bg-stone-50 shadow-sm transition-all"
+            >
+              <Download size={14} />
+              <span>Export CSV</span>
+            </button>
+          )}
           <button 
             onClick={() => navigate('/calendar')}
             className="flex items-center gap-2 px-4 py-2 border border-[--border-strong] rounded-lg text-xs font-bold text-[--text-secondary] bg-white hover:bg-stone-50 shadow-sm transition-all"

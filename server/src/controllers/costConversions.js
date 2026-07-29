@@ -1,4 +1,6 @@
 import pg from 'pg';
+import Cursor from 'pg-cursor';
+pg.Cursor = pg.Cursor || Cursor;
 import { query } from '../config/db.js';
 import pool from '../config/db.js';
 import crypto from 'crypto';
@@ -872,50 +874,26 @@ export const exportCostConversionsCsv = async (req, res) => {
     }
     sql += ` ORDER BY l.created_at DESC`;
 
-    // Grab a dedicated client from the pool for cursor use
-    const client = await pool.connect();
-    let streamError = null;
-
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=cost-conversions-export-${Date.now()}.csv`);
     // Disable compression for streaming responses
     res.setHeader('X-No-Compression', '1');
 
     try {
-        await client.query('BEGIN');
-        const cursor = client.query(new pg.Cursor(sql, params));
-
-        // Write header immediately so the download starts in the browser
+        const rowsRes = await query(sql, params);
         res.write(csvHeader);
-
-        const PAGE = 500;
-        let firstChunk = true;
-        while (true) {
-            const rows = await new Promise((resolve, reject) =>
-                cursor.read(PAGE, (err, rows) => (err ? reject(err) : resolve(rows)))
-            );
-            if (!rows || rows.length === 0) break;
-
-            const lines = rows.map(l => serializeLeadCsvRow(l, isPositive));
-            res.write((firstChunk ? '' : '\n') + lines.join('\n'));
-            firstChunk = false;
+        const lines = rowsRes.rows.map(l => serializeLeadCsvRow(l, isPositive));
+        if (lines.length > 0) {
+            res.write(lines.join('\n') + '\n');
         }
-
-        await cursor.close();
-        await client.query('COMMIT');
+        res.end();
     } catch (error) {
-        streamError = error;
-        console.error('[Export CSV] Stream error:', error.message);
-        try { await client.query('ROLLBACK'); } catch (_) {}
-    } finally {
-        client.release();
+        console.error('[Export CSV] Error:', error.message);
+        if (!res.headersSent) {
+            return res.status(500).json({ success: false, error: error.message });
+        }
+        res.end();
     }
-
-    if (streamError && !res.headersSent) {
-        return res.status(500).json({ success: false, error: streamError.message });
-    }
-
-    res.end();
 };
 
 /**

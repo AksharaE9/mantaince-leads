@@ -28,6 +28,7 @@ import {
 import axios from '../api/axios.js';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
+import InteractiveStatusSelect from '../components/InteractiveStatusSelect.jsx';
 import Loader from '../components/Loader.jsx';
 import { useAuthStore } from '../store/authStore.js';
 import { useUiStore } from '../store/uiStore.js';
@@ -674,7 +675,7 @@ export const FollowUpsPositivesPage = () => {
       if (dateFromFilter) qParams.set('dateFrom', dateFromFilter);
       if (dateToFilter) qParams.set('dateTo', dateToFilter);
 
-      const response = await axios.get(`/api/v1/leads/export/csv?${qParams.toString()}`);
+      const response = await axios.get(`/api/v1/leads/export/csv?${qParams.toString()}`, { responseType: 'blob' });
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -683,6 +684,7 @@ export const FollowUpsPositivesPage = () => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } catch {
       toast.error('Failed to export CSV database.');
     }
@@ -836,7 +838,14 @@ export const FollowUpsPositivesPage = () => {
       {
         accessorKey: 'status',
         header: 'Status',
-        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+        cell: ({ row }) => (
+          <InteractiveStatusSelect
+            leadId={row.original._id}
+            currentStatus={row.original.status}
+            statusOptions={STATUS_OPTIONS}
+            onStatusUpdated={() => fetchLeads()}
+          />
+        ),
       },
       {
         id: 'actions',

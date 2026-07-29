@@ -223,11 +223,11 @@ export default function CsvImportModal({
     }
   };
 
-  const downloadErrorReport = async () => {
+  const downloadFailedRecords = async () => {
     try {
-      await downloadCsvFromEndpoint(ep.failedRows(uploadResult.batchId), `error-report-${uploadResult.batchId}.csv`);
+      await downloadCsvFromEndpoint(ep.failedRows(uploadResult.batchId), `failed-records-${uploadResult.batchId}.csv`);
     } catch {
-      toast.error('Failed to download error report.');
+      toast.error('Failed to download failed records report.');
     }
   };
 
@@ -426,11 +426,11 @@ export default function CsvImportModal({
                   <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">Error Log Summary:</span>
                   <button
                     type="button"
-                    onClick={downloadErrorReport}
+                    onClick={downloadFailedRecords}
                     className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
                   >
                     <Download size={11} />
-                    <span>Download Full Error Report</span>
+                    <span>Download Failed Records</span>
                   </button>
                 </div>
                 <div className="border border-red-100 rounded-lg p-3 bg-red-50/20 max-h-[140px] overflow-y-auto text-xs font-mono text-red-600 space-y-1">

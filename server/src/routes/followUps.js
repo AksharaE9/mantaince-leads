@@ -8,7 +8,8 @@ import {
   getCalendarGrid,
   getCalendarFollowUpsByDate,
   getFollowUpVerticalStats,
-  promoteCosLeadsToFollowUps
+  promoteCosLeadsToFollowUps,
+  exportFollowUpsCsv
 } from '../controllers/followUps.js';
 import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
@@ -44,5 +45,6 @@ router.delete('/follow-ups/:id', checkPermission(['leads:update', 'leads:update_
 router.get('/verticals/:verticalId/follow-ups/calendar', checkPermission(['leads:read', 'leads:read_own']), getCalendarGrid);
 router.get('/verticals/:verticalId/follow-ups/by-date', checkPermission(['leads:read', 'leads:read_own']), getCalendarFollowUpsByDate);
 router.get('/verticals/:verticalId/follow-ups/stats', checkPermission(['leads:read', 'leads:read_own']), getFollowUpVerticalStats);
+router.get('/verticals/:verticalId/follow-ups/export/csv', checkPermission(['leads:read', 'leads:read_own']), exportFollowUpsCsv);
 
 export default router;

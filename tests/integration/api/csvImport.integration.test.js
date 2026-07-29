@@ -257,7 +257,10 @@ describe('Bulk lead-import API (CSV/Excel) — regression coverage', () => {
         .expect(200);
 
       expect(res.headers['content-type']).toContain('text/csv');
-      expect(res.text).toContain('ERROR REASON');
+      expect(res.text).toContain('Business Name,Phone Number,Reason for Failure');
+      expect(res.text).toContain('Acme');
+      expect(res.text).toContain('bad');
+      expect(res.text).toContain('invalid phone');
     });
 
     it('denies an agent user from downloading failed rows for another user\'s CSV log', async () => {

@@ -197,7 +197,7 @@ export const OperationReportsPage = () => {
                               {errors.length > 0 && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleDownload(report); }}
-                                  title="Download full report as CSV"
+                                  title="Download Failed Records"
                                   className="p-1.5 border border-[--border-strong] hover:bg-white text-[--text-secondary] rounded-lg transition-all shadow-sm"
                                 >
                                   <Download size={13} />

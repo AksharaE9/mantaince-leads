@@ -794,3 +794,114 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
   }
 };
 
+/**
+ * GET /verticals/:verticalId/export/csv
+ */
+export const exportFollowUpsCsv = async (req, res) => {
+  const { verticalId } = req.params;
+  const { date, assignedTo, subVerticalId, status, search } = req.query;
+
+  try {
+    if (!verticalId || !isValidUUID(verticalId)) {
+      return res.status(400).json({ success: false, error: 'A valid verticalId is required' });
+    }
+    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+    }
+
+    let sql = `
+      SELECT f.id,
+             to_char(f.follow_up_date, 'YYYY-MM-DD HH24:MI') AS follow_up_date_str,
+             to_char(f.completed_at, 'YYYY-MM-DD HH24:MI') AS completed_at_str,
+             to_char(f.created_at, 'YYYY-MM-DD HH24:MI') AS created_at_str,
+             f.description,
+             f.status,
+             f.completed_note,
+             l.name as lead_name, l.business_name as lead_business,
+             u_assign.name as assigned_to_name,
+             u_creator.name as creator_name,
+             sv.name as sub_vertical_name
+      FROM follow_ups f
+      JOIN cost_conversions l ON f.cost_conversion_id = l.id
+      JOIN users u_assign ON f.assigned_to_id = u_assign.id
+      JOIN users u_creator ON f.created_by_id = u_creator.id
+      JOIN sub_verticals sv ON f.sub_vertical_id = sv.id
+      WHERE sv.vertical_id = $1
+    `;
+    const params = [verticalId];
+    let pIdx = 2;
+
+    if (date) {
+      sql += ` AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $${pIdx++}::date`;
+      params.push(date);
+    }
+    if (assignedTo && isValidUUID(assignedTo)) {
+      sql += ` AND f.assigned_to_id = $${pIdx++}`;
+      params.push(assignedTo);
+    }
+    if (subVerticalId && isValidUUID(subVerticalId)) {
+      sql += ` AND f.sub_vertical_id = $${pIdx++}`;
+      params.push(subVerticalId);
+    }
+    if (status && status !== 'ALL') {
+      sql += ` AND f.status = $${pIdx++}`;
+      params.push(status);
+    }
+    if (search) {
+      sql += ` AND (l.business_name ILIKE $${pIdx} OR l.name ILIKE $${pIdx} OR l.phone ILIKE $${pIdx})`;
+      params.push(`%${search}%`);
+      pIdx++;
+    }
+
+    sql += ` ORDER BY f.follow_up_date ASC`;
+
+    const result = await query(sql, params);
+
+    // Escape CSV values
+    const sanitizeCsvValue = (val) => {
+      const s = String(val ?? '');
+      const guarded = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+      return guarded.replace(/"/g, '""');
+    };
+
+    const csvLine = (vals) => vals.map(v => `"${sanitizeCsvValue(v)}"`).join(',');
+    const headers = [
+      'FOLLOW-UP DATE & TIME',
+      'LEAD NAME',
+      'BUSINESS NAME',
+      'SUB-VERTICAL',
+      'ASSIGNED EMPLOYEE',
+      'CREATED BY',
+      'VISIT INSTRUCTION / AGENDA',
+      'STATUS',
+      'VISIT OUTCOME REPORT',
+      'COMPLETED AT',
+      'CREATED AT'
+    ];
+    const lines = [csvLine(headers)];
+    
+    for (const row of result.rows) {
+      lines.push(csvLine([
+        row.follow_up_date_str || '',
+        row.lead_name || '',
+        row.lead_business || '',
+        row.sub_vertical_name || '',
+        row.assigned_to_name || '',
+        row.creator_name || '',
+        row.description || '',
+        row.status || '',
+        row.completed_note || '',
+        row.completed_at_str || '',
+        row.created_at_str || ''
+      ]));
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=follow-ups-export-${Date.now()}.csv`);
+    return res.status(200).send(lines.join('\n') + '\n');
+  } catch (error) {
+    return sendControllerError(res, error, 'exportFollowUpsCsv');
+  }
+};
+
+
