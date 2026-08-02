@@ -118,8 +118,9 @@ export const getCostConversions = async (req, res) => {
 
         const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
         if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
-            wheres.push(`l.assigned_to = $${pIdx++}`);
+            wheres.push(`(l.assigned_to = $${pIdx} OR l.uploaded_by = $${pIdx})`);
             params.push(req.user.sub);
+            pIdx++;
         }
 
         if (subVerticalId && isValidUUID(subVerticalId)) {
@@ -484,7 +485,7 @@ export const getCostConversionById = async (req, res) => {
         }
 
         const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
-        if (!hasFullRead && req.role?.permissions.includes('leads:read_own') && lead.assigned_to !== req.user.sub) {
+        if (!hasFullRead && req.role?.permissions.includes('leads:read_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
         }
 
@@ -505,7 +506,7 @@ export const updateCostConversion = async (req, res) => {
         return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
     }
     try {
-        const leadRes = await query('SELECT id, vertical_id, is_deleted, assigned_to, lead_type FROM cost_conversions WHERE id = $1', [id]);
+        const leadRes = await query('SELECT id, vertical_id, is_deleted, assigned_to, uploaded_by, lead_type FROM cost_conversions WHERE id = $1', [id]);
         const lead    = leadRes.rows[0];
         if (!lead || lead.is_deleted) {
             return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
@@ -516,7 +517,7 @@ export const updateCostConversion = async (req, res) => {
         }
 
         const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
-        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub) {
+        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
         }
 
@@ -686,7 +687,7 @@ export const deleteCostConversion = async (req, res) => {
         return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
     }
     try {
-        const leadRes = await query('SELECT id, vertical_id, assigned_to, is_deleted FROM cost_conversions WHERE id = $1', [id]);
+        const leadRes = await query('SELECT id, vertical_id, assigned_to, uploaded_by, is_deleted FROM cost_conversions WHERE id = $1', [id]);
         const lead    = leadRes.rows[0];
         if (!lead || lead.is_deleted) {
             return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
@@ -697,7 +698,7 @@ export const deleteCostConversion = async (req, res) => {
         }
 
         const hasFullDelete = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:delete');
-        if (!hasFullDelete && req.role?.permissions.includes('leads:delete_own') && lead.assigned_to !== req.user.sub) {
+        if (!hasFullDelete && req.role?.permissions.includes('leads:delete_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
         }
 
@@ -724,7 +725,7 @@ export const updateCostConversionStatus = async (req, res) => {
         return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
     }
     try {
-        const leadRes = await query('SELECT id, vertical_id, assigned_to, is_deleted FROM cost_conversions WHERE id = $1', [id]);
+        const leadRes = await query('SELECT id, vertical_id, assigned_to, uploaded_by, is_deleted FROM cost_conversions WHERE id = $1', [id]);
         const lead    = leadRes.rows[0];
         if (!lead || lead.is_deleted) {
             return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
@@ -735,7 +736,7 @@ export const updateCostConversionStatus = async (req, res) => {
         }
 
         const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
-        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub) {
+        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
         }
 
@@ -866,8 +867,14 @@ export const exportCostConversionsCsv = async (req, res) => {
         LEFT JOIN users u ON u.id = l.assigned_to
         WHERE l.vertical_id = $1 AND l.is_deleted = false
     `;
+    const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
+    if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
+        sql += ` AND (l.assigned_to = $2 OR l.uploaded_by = $2)`;
+        params.push(req.user.sub);
+    }
+    const leadTypeIdx = params.length + 1;
     if (leadType) {
-        sql += ` AND l.lead_type = $2`;
+        sql += ` AND l.lead_type = $${leadTypeIdx}`;
         params.push(leadType);
     } else {
         sql += ` AND l.lead_type != 'POSITIVE'`;
@@ -905,7 +912,7 @@ export const uploadCostConversionPhoto = async (req, res) => {
         return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
     }
     try {
-        const leadRes = await query('SELECT id, vertical_id, is_deleted, assigned_to FROM cost_conversions WHERE id = $1', [id]);
+        const leadRes = await query('SELECT id, vertical_id, is_deleted, assigned_to, uploaded_by FROM cost_conversions WHERE id = $1', [id]);
         const lead = leadRes.rows[0];
         if (!lead || lead.is_deleted) {
             return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
@@ -916,7 +923,7 @@ export const uploadCostConversionPhoto = async (req, res) => {
         }
 
         const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
-        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub) {
+        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
         }
 

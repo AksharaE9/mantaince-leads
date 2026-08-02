@@ -12,7 +12,7 @@ export const getAuditLogs = async (req, res) => {
       if (!targetId) {
         return res.status(403).json({ success: false, error: 'Forbidden: targetId is required' });
       }
-      const costConversionCheck = await query('SELECT vertical_id, assigned_to, is_deleted FROM cost_conversions WHERE id = $1', [targetId]);
+      const costConversionCheck = await query('SELECT vertical_id, assigned_to, uploaded_by, is_deleted FROM cost_conversions WHERE id = $1', [targetId]);
       const costConversion = costConversionCheck.rows[0];
       if (!costConversion || costConversion.is_deleted) {
         return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
@@ -20,7 +20,7 @@ export const getAuditLogs = async (req, res) => {
       if (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id)) {
         return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
       }
-      if (req.role.name === 'agent' && costConversion.assigned_to !== req.user.sub) {
+      if (req.role.name === 'agent' && costConversion.assigned_to !== req.user.sub && costConversion.uploaded_by !== req.user.sub) {
         return res.status(403).json({ success: false, error: 'Access forbidden: this cost/conversion is not assigned to you' });
       }
     }

@@ -299,7 +299,7 @@ export const deleteFollowUp = async (req, res) => {
 export const getFollowUpSummary = async (req, res) => {
   const { costConversionId } = req.params;
   try {
-    const costConversionRes = await query('SELECT vertical_id, assigned_to FROM cost_conversions WHERE id = $1 AND is_deleted = false', [costConversionId]);
+    const costConversionRes = await query('SELECT vertical_id, assigned_to, uploaded_by FROM cost_conversions WHERE id = $1 AND is_deleted = false', [costConversionId]);
     const costConversion = costConversionRes.rows[0];
     if (!costConversion) {
       return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
@@ -308,6 +308,11 @@ export const getFollowUpSummary = async (req, res) => {
     // Scoping check
     if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+    }
+
+    const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
+    if (!hasFullRead && req.role?.permissions.includes('leads:read_own') && costConversion.assigned_to !== req.user.sub && costConversion.uploaded_by !== req.user.sub) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
     }
 
 
@@ -385,6 +390,13 @@ export const getCalendarGrid = async (req, res) => {
     `;
     const params = [verticalId, startOfMonth];
     let pIdx = 3;
+
+    const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
+    if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
+      sql += ` AND (f.assigned_to_id = $${pIdx} OR l.assigned_to = $${pIdx} OR l.uploaded_by = $${pIdx})`;
+      params.push(req.user.sub);
+      pIdx++;
+    }
 
     if (targetAssigned && isValidUUID(targetAssigned)) {
       sql += ` AND f.assigned_to_id = $${pIdx++}`;
@@ -472,6 +484,13 @@ export const getCalendarFollowUpsByDate = async (req, res) => {
     const params = [verticalId, date];
     let pIdx = 3;
 
+    const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
+    if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
+      sql += ` AND (f.assigned_to_id = $${pIdx} OR l.assigned_to = $${pIdx} OR l.uploaded_by = $${pIdx})`;
+      params.push(req.user.sub);
+      pIdx++;
+    }
+
     if (targetAssigned && isValidUUID(targetAssigned)) {
       sql += ` AND f.assigned_to_id = $${pIdx++}`;
       params.push(targetAssigned);
@@ -505,6 +524,8 @@ export const getFollowUpVerticalStats = async (req, res) => {
   try {
     const targetDate = date || new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
     
+    const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
+    
     let sql = `
       SELECT 
         COUNT(*)::int AS all_total,
@@ -518,12 +539,23 @@ export const getFollowUpVerticalStats = async (req, res) => {
         COUNT(*) FILTER (WHERE f.status = 'MISSED' AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $2::date)::int AS daily_missed
       FROM follow_ups f
       JOIN sub_verticals sv ON f.sub_vertical_id = sv.id
-      WHERE sv.vertical_id = $1
     `;
+    if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
+      sql += ` LEFT JOIN cost_conversions l ON f.cost_conversion_id = l.id `;
+    }
+    sql += ` WHERE sv.vertical_id = $1 `;
+    
     const params = [verticalId, targetDate];
+    let pIdx = 3;
+    
+    if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
+      sql += ` AND (f.assigned_to_id = $${pIdx} OR l.assigned_to = $${pIdx} OR l.uploaded_by = $${pIdx})`;
+      params.push(req.user.sub);
+      pIdx++;
+    }
 
     if (subVerticalId) {
-      sql += ` AND f.sub_vertical_id = $3`;
+      sql += ` AND f.sub_vertical_id = $${pIdx++}`;
       params.push(subVerticalId);
     }
 
@@ -830,6 +862,13 @@ export const exportFollowUpsCsv = async (req, res) => {
     `;
     const params = [verticalId];
     let pIdx = 2;
+
+    const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
+    if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
+      sql += ` AND (f.assigned_to_id = $${pIdx} OR l.assigned_to = $${pIdx} OR l.uploaded_by = $${pIdx})`;
+      params.push(req.user.sub);
+      pIdx++;
+    }
 
     if (date) {
       sql += ` AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $${pIdx++}::date`;

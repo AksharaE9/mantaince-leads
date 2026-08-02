@@ -29,10 +29,19 @@ export const createEscalation = async (req, res) => {
     }
 
     // 2. Verify cost conversion exists
-    const costConversionRes = await query('SELECT id, name, business_name, vertical_id FROM cost_conversions WHERE id = $1 AND is_deleted = false', [costConversionId]);
+    const costConversionRes = await query('SELECT id, name, business_name, vertical_id, assigned_to, uploaded_by FROM cost_conversions WHERE id = $1 AND is_deleted = false', [costConversionId]);
     const costConversion = costConversionRes.rows[0];
     if (!costConversion) {
       return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
+    }
+
+    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+    }
+
+    const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
+    if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && costConversion.assigned_to !== req.user.sub && costConversion.uploaded_by !== req.user.sub) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
     }
 
     // 3. Create escalation
@@ -71,12 +80,24 @@ export const createEscalation = async (req, res) => {
   }
 };
 
-/**
- * GET /cost-conversions/:id/escalations
- */
 export const getCostConversionEscalations = async (req, res) => {
   const { id: costConversionId } = req.params;
   try {
+    const costConversionRes = await query('SELECT vertical_id, assigned_to, uploaded_by FROM cost_conversions WHERE id = $1 AND is_deleted = false', [costConversionId]);
+    const costConversion = costConversionRes.rows[0];
+    if (!costConversion) {
+      return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
+    }
+
+    if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(costConversion.vertical_id))) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+    }
+
+    const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
+    if (!hasFullRead && req.role?.permissions.includes('leads:read_own') && costConversion.assigned_to !== req.user.sub && costConversion.uploaded_by !== req.user.sub) {
+      return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
+    }
+
     const result = await query(`
       SELECT e.*, 
              u_by.name as escalated_by_name, u_by.email as escalated_by_email,
