@@ -39,10 +39,7 @@ export const createEscalation = async (req, res) => {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
 
-    const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
-    if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && costConversion.assigned_to !== req.user.sub && costConversion.uploaded_by !== req.user.sub) {
-      return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
-    }
+
 
     // 3. Create escalation
     const id = crypto.randomUUID();
@@ -93,10 +90,7 @@ export const getCostConversionEscalations = async (req, res) => {
       return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
 
-    const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
-    if (!hasFullRead && req.role?.permissions.includes('leads:read_own') && costConversion.assigned_to !== req.user.sub && costConversion.uploaded_by !== req.user.sub) {
-      return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
-    }
+
 
     const result = await query(`
       SELECT e.*, 

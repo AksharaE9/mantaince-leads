@@ -53,14 +53,7 @@ export const getRawData = async (req, res) => {
         const filters = buildRawDataFilters(req.query, 2);
         wheres.push(...filters.clauses);
         params.push(...filters.params);
-        let pIdx = filters.nextIdx;
-
-        const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
-        if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
-            wheres.push(`(r.assigned_user_id = $${pIdx} OR r.created_by = $${pIdx})`);
-            params.push(req.user.sub);
-            pIdx++;
-        }
+        const pIdx = filters.nextIdx;
 
         const limitNum = Math.min(parseInt(limit, 10) || 25, 100);
         const pageNum = Math.max(parseInt(page, 10) || 1, 1);
@@ -134,14 +127,6 @@ export const exportRawDataCsv = async (req, res) => {
         const filters = buildRawDataFilters(req.query, 2);
         wheres.push(...filters.clauses);
         params.push(...filters.params);
-        let pIdx = filters.nextIdx;
-
-        const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
-        if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
-            wheres.push(`(r.assigned_user_id = $${pIdx} OR r.created_by = $${pIdx})`);
-            params.push(req.user.sub);
-            pIdx++;
-        }
 
         const sortCol = resolveRawDataSortColumn(sortBy);
         const sortDirection = sortDir === 'asc' ? 'ASC' : 'DESC';

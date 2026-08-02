@@ -54,14 +54,7 @@ export const getDeliveryData = async (req, res) => {
         const filters = buildDeliveryDataFilters(req.query, 2);
         wheres.push(...filters.clauses);
         params.push(...filters.params);
-        let pIdx = filters.nextIdx;
-
-        const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
-        if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
-            wheres.push(`(d.assigned_user_id = $${pIdx} OR d.created_by = $${pIdx})`);
-            params.push(req.user.sub);
-            pIdx++;
-        }
+        const pIdx = filters.nextIdx;
 
         const limitNum = Math.min(parseInt(limit, 10) || 25, 100);
         const pageNum = Math.max(parseInt(page, 10) || 1, 1);
@@ -135,14 +128,6 @@ export const exportDeliveryDataCsv = async (req, res) => {
         const filters = buildDeliveryDataFilters(req.query, 2);
         wheres.push(...filters.clauses);
         params.push(...filters.params);
-        let pIdx = filters.nextIdx;
-
-        const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
-        if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
-            wheres.push(`(d.assigned_user_id = $${pIdx} OR d.created_by = $${pIdx})`);
-            params.push(req.user.sub);
-            pIdx++;
-        }
 
         const sortCol = resolveDeliveryDataSortColumn(sortBy);
         const sortDirection = sortDir === 'asc' ? 'ASC' : 'DESC';

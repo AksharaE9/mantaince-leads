@@ -116,12 +116,7 @@ export const getCostConversions = async (req, res) => {
         const wheres  = ['l.vertical_id = $1', 'l.is_deleted = false', "(l.duplicate_status IS NULL OR l.duplicate_status NOT IN ('duplicate_removed', 'promoted_removed'))"];
         let   pIdx    = 2;
 
-        const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
-        if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
-            wheres.push(`(l.assigned_to = $${pIdx} OR l.uploaded_by = $${pIdx})`);
-            params.push(req.user.sub);
-            pIdx++;
-        }
+
 
         if (subVerticalId && isValidUUID(subVerticalId)) {
             wheres.push(`l.sub_vertical_id = $${pIdx++}`);
@@ -484,10 +479,7 @@ export const getCostConversionById = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
 
-        const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
-        if (!hasFullRead && req.role?.permissions.includes('leads:read_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
-        }
+
 
 
         return res.status(200).json({ success: true, data: lead });
@@ -516,10 +508,7 @@ export const updateCostConversion = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
 
-        const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
-        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
-        }
+
 
 
         if (updates.name !== undefined && (!updates.name || !updates.name.trim())) {
@@ -698,7 +687,11 @@ export const deleteCostConversion = async (req, res) => {
         }
 
         const hasFullDelete = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:delete');
-        if (!hasFullDelete && req.role?.permissions.includes('leads:delete_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
+        const hasOwnDelete = req.role?.permissions.includes('leads:delete_own');
+        if (!hasFullDelete && !hasOwnDelete) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have permission to delete leads' });
+        }
+        if (!hasFullDelete && hasOwnDelete && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
             return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
         }
 
@@ -735,10 +728,7 @@ export const updateCostConversionStatus = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
 
-        const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
-        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
-        }
+
 
 
         const updatedRes = await query(
@@ -867,11 +857,7 @@ export const exportCostConversionsCsv = async (req, res) => {
         LEFT JOIN users u ON u.id = l.assigned_to
         WHERE l.vertical_id = $1 AND l.is_deleted = false
     `;
-    const hasFullRead = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:read');
-    if (!hasFullRead && req.role?.permissions.includes('leads:read_own')) {
-        sql += ` AND (l.assigned_to = $2 OR l.uploaded_by = $2)`;
-        params.push(req.user.sub);
-    }
+
     const leadTypeIdx = params.length + 1;
     if (leadType) {
         sql += ` AND l.lead_type = $${leadTypeIdx}`;
@@ -922,10 +908,7 @@ export const uploadCostConversionPhoto = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
 
-        const hasFullUpdate = req.role?.permissions.includes('*') || req.role?.permissions.includes('leads:update');
-        if (!hasFullUpdate && req.role?.permissions.includes('leads:update_own') && lead.assigned_to !== req.user.sub && lead.uploaded_by !== req.user.sub) {
-            return res.status(403).json({ success: false, error: 'Access forbidden: you are not assigned to this lead' });
-        }
+
 
 
         if (!req.file) {

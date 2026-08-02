@@ -119,7 +119,7 @@ describe('Agent Data Visibility Integration Tests', () => {
   });
 
   describe('Leads Data Visibility', () => {
-    it('agent should see leads they uploaded OR leads assigned to them', async () => {
+    it('agent should see all leads in their vertical (including other agents)', async () => {
       const res = await request(app)
         .get(`/api/v1/cost-conversions?verticalId=${verticalId}`)
         .set('Authorization', `Bearer ${agentToken}`)
@@ -131,43 +131,36 @@ describe('Agent Data Visibility Integration Tests', () => {
 
       expect(leadIds).toContain(leadUploadedByAgent);
       expect(leadIds).toContain(leadAssignedToAgent);
-      expect(leadIds).not.toContain(leadForOtherAgent);
+      expect(leadIds).toContain(leadForOtherAgent);
     });
 
-    it('agent should be able to get detail of a lead they uploaded', async () => {
+    it('agent should be able to get detail of any lead in their vertical', async () => {
       const res = await request(app)
-        .get(`/api/v1/cost-conversions/${leadUploadedByAgent}`)
+        .get(`/api/v1/cost-conversions/${leadForOtherAgent}`)
         .set('Authorization', `Bearer ${agentToken}`)
         .expect(200);
 
       expect(res.body.success).toBe(true);
-      expect(res.body.data.id).toBe(leadUploadedByAgent);
+      expect(res.body.data.id).toBe(leadForOtherAgent);
     });
 
-    it('agent should be blocked from getting detail of another agent lead', async () => {
+    it('agent should be blocked from deleting any lead', async () => {
       await request(app)
-        .get(`/api/v1/cost-conversions/${leadForOtherAgent}`)
+        .delete(`/api/v1/cost-conversions/${leadUploadedByAgent}`)
         .set('Authorization', `Bearer ${agentToken}`)
         .expect(403);
     });
   });
 
   describe('Follow-up Summary Scoping', () => {
-    it('agent should see follow-up summary for lead they uploaded', async () => {
+    it('agent should see follow-up summary for any lead in their vertical', async () => {
       const res = await request(app)
-        .get(`/api/v1/followUps/cost-conversions/${leadUploadedByAgent}/follow-ups/summary`)
+        .get(`/api/v1/followUps/cost-conversions/${leadForOtherAgent}/follow-ups/summary`)
         .set('Authorization', `Bearer ${agentToken}`)
         .expect(200);
 
       expect(res.body.success).toBe(true);
       expect(res.body.data).toHaveProperty('total');
-    });
-
-    it('agent should be blocked from follow-up summary of another agent lead', async () => {
-      await request(app)
-        .get(`/api/v1/followUps/cost-conversions/${leadForOtherAgent}/follow-ups/summary`)
-        .set('Authorization', `Bearer ${agentToken}`)
-        .expect(403);
     });
   });
 });
