@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run lint:no-undef && vite build",
     "lint": "eslint .",
+    "lint:no-undef": "eslint -c eslint.undef.config.js --no-inline-config .",
     "preview": "vite preview"
   },
   "dependencies": {

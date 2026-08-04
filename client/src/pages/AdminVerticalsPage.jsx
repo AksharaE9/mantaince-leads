@@ -469,7 +469,7 @@ export const AdminVerticalsPage = () => {
             <span className="text-[10px] text-[--text-muted] uppercase font-bold tracking-wider">Sort Order</span>
           </div>
 
-          <div className="divide-y divide-[--border] overflow-y-auto max-h-[500px]">
+          <div className="divide-y divide-[--border]">
             {loading ? (
               Array.from({ length: 3 }).map((_, idx) => (
                 <div key={idx} className="p-4 animate-pulse flex items-center justify-between">

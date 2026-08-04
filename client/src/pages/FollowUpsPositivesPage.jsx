@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Download,
   Edit,
+  ExternalLink,
   FileSpreadsheet,
   Filter,
   Plus,

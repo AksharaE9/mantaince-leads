@@ -39,8 +39,15 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Global form element overrides */
-  input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+  /* Global form element overrides.
+     NOTE: the exclusions are wrapped in :where() (zero specificity) rather
+     than bare :not() chains. Bare :not([type=...]) selectors push this
+     rule's specificity above a single Tailwind utility class (e.g. pl-9,
+     pl-10), so per-input overrides like search-icon padding would silently
+     never apply no matter which class was used. :where() keeps the same
+     checkbox/radio exclusion but lets ordinary utility classes win, as
+     intended. */
+  input:where(:not([type="checkbox"]):not([type="radio"])), select, textarea {
     background: var(--bg-input);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
@@ -52,7 +59,7 @@
     width: 100%;
   }
 
-  input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus {
+  input:where(:not([type="checkbox"]):not([type="radio"])):focus, select:focus, textarea:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-light);
   }
