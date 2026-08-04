@@ -284,7 +284,7 @@ describe('Delivery Data API', () => {
             expect(res.body.success).toBe(false);
         });
 
-        it('accepts a well-formed CSV upload, queues it, and the processor inserts valid rows while rejecting unresolvable ones and detecting a same-event duplicate', async () => {
+        it('accepts a well-formed CSV upload, queues it, and the processor inserts valid rows — an unresolvable employee name is a warning, not a rejection, and a same-event duplicate is still detected', async () => {
             // Background worker loop is disabled under NODE_ENV=test — drive the
             // queue -> process pipeline directly, same pattern as
             // rawData.integration.test.js.
@@ -317,15 +317,24 @@ describe('Delivery Data API', () => {
 
             const finalLog = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
             expect(finalLog.status).toBe('done');
-            expect(finalLog.success_count).toBe(1);
+            // Phone-number-only-mandatory policy: "Nobody Matches" no longer
+            // blocks its row (see MissingFieldDataDiagnosis.md's 55-row Delivery
+            // Data upload — same "No matching employee found" failure mode) — it
+            // inserts unassigned with a warning. Duplicate detection (row 3, an
+            // exact repeat of row 1) is unaffected by this policy change.
+            expect(finalLog.success_count).toBe(2);
             expect(finalLog.duplicate_count).toBe(1);
-            expect(finalLog.failed_count).toBe(1); // unresolvable employee (duplicates are tracked separately now)
+            expect(finalLog.failed_count).toBe(0);
+            expect((finalLog.errors || []).some(e => e.warning && e.field === 'employeeName')).toBe(true);
 
-            const inserted = await query('SELECT * FROM delivery_data WHERE csv_batch_id = $1', [batchId]);
-            expect(inserted.rows).toHaveLength(1);
-            expect(inserted.rows[0].assigned_user_id).toBe(agentId);
-            expect(inserted.rows[0].business_name).toBe('Bulk Delivery Co');
-            expect(inserted.rows[0].delivery_time).toBe('2:00 PM - 3:00 PM');
+            const inserted = await query('SELECT * FROM delivery_data WHERE csv_batch_id = $1 ORDER BY business_name', [batchId]);
+            expect(inserted.rows).toHaveLength(2);
+            const resolved = inserted.rows.find(r => r.business_name === 'Bulk Delivery Co');
+            const unresolved = inserted.rows.find(r => r.business_name === 'Bad Row');
+            expect(resolved.assigned_user_id).toBe(agentId);
+            expect(resolved.delivery_time).toBe('2:00 PM - 3:00 PM');
+            expect(unresolved.assigned_user_id).toBeNull();
+            expect(unresolved.employee_name_raw).toBe('Nobody Matches');
         }, 20000);
     });
 });

@@ -147,10 +147,10 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Date" required>
-              <input type="date" required className="w-full" value={form.date} onChange={set('date')} />
+            <FormField label="Date">
+              <input type="date" className="w-full" value={form.date} onChange={set('date')} />
             </FormField>
-            <FormField label="Employee Name" required>
+            <FormField label="Employee Name">
               <SearchableOperatorSelect agents={agents} value={assignedTo} onChange={setAssignedTo} placeholder="-- Select employee --" />
             </FormField>
             <FormField label="Business Type">
@@ -162,8 +162,8 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
                 <option value="Services" />
               </datalist>
             </FormField>
-            <FormField label="Business Name" required>
-              <input type="text" required className="w-full" value={form.businessName} onChange={set('businessName')} />
+            <FormField label="Business Name">
+              <input type="text" placeholder="-" className="w-full" value={form.businessName} onChange={set('businessName')} />
             </FormField>
             <FormField label="Area">
               <input type="text" placeholder="-" className="w-full" value={form.area} onChange={set('area')} />
@@ -192,7 +192,7 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
             <button type="button" onClick={handleClose} className="px-4 py-2 border border-[--border-strong] rounded-lg text-sm text-[--text-secondary] font-semibold bg-white hover:bg-stone-50">
               Cancel
             </button>
-            <button type="submit" disabled={saving || !assignedTo} className="px-4 py-2 bg-[--accent] text-white rounded-lg font-bold text-sm hover:bg-[--accent-hover] shadow-sm disabled:opacity-40">
+            <button type="submit" disabled={saving} className="px-4 py-2 bg-[--accent] text-white rounded-lg font-bold text-sm hover:bg-[--accent-hover] shadow-sm disabled:opacity-40">
               {saving ? 'Saving...' : 'Save Raw Data'}
             </button>
           </div>

@@ -16,6 +16,7 @@ import {
     getKnownBusinessTypes,
     buildRawDataFilters,
     resolveRawDataSortColumn,
+    parseFlexibleDate,
 } from '../services/rawDataImportSchema.js';
 import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
 
@@ -194,7 +195,7 @@ export const createRawData = async (req, res) => {
             remarks: req.body.remarks,
         };
 
-        const { errors, warnings, assignedUserId } = validateRawDataRow(row, { agents, knownBusinessTypes });
+        const { errors, warnings, assignedUserId, employeeNameRaw } = validateRawDataRow(row, { agents, knownBusinessTypes });
         if (errors.length > 0) {
             return operationError(res, {
                 status: 422, code: ErrorCodes.VALIDATION_FAILED,
@@ -223,15 +224,20 @@ export const createRawData = async (req, res) => {
             INSERT INTO raw_data (
                 id, vertical_id, assigned_user_id, date, business_type, business_name,
                 area, city, phone_number, address, appointment_date, appointment_timings,
-                remarks, source, created_by
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'single_add',$14)
+                remarks, source, created_by, employee_name_raw
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'single_add',$14,$15)
             RETURNING *
         `, [
             id, verticalId, assignedUserId,
-            row.date || null, row.businessType || null, row.businessName,
+            // Parsed the same way the bulk-upload processors do (ISO,
+            // DD-MM-YYYY/DD-MM-YY, Excel serial) rather than handing the raw
+            // string straight to Postgres's DATE column, whose own parsing
+            // depends on the server's DateStyle setting and isn't guaranteed
+            // to agree with this app's DD-MM-YYYY convention.
+            parseFlexibleDate(row.date), row.businessType || null, row.businessName || null,
             row.area || null, row.city || null, phone, row.address || null,
-            row.appointmentDate || null, row.appointmentTimings || null,
-            row.remarks || null, req.user.sub,
+            parseFlexibleDate(row.appointmentDate), row.appointmentTimings || null,
+            row.remarks || null, req.user.sub, employeeNameRaw || null,
         ]);
 
         logAudit(req, { action: 'raw_data.create', targetCollection: 'raw_data', targetId: id, after: insertRes.rows[0] });

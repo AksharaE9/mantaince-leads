@@ -66,9 +66,13 @@ describe('Vercel inline (process.env.VERCEL) upload branch', () => {
     });
 
     it('Leads: processes inline, reaches done with correct counts, response is 202 with a batchId', async () => {
+        // Phone-number-only-mandatory policy (see CLAUDE.md): a blank Business
+        // Name no longer blocks a row — it's a warning, and the row inserts.
+        // Contact Number remains the only field that blocks insertion.
         const csv = 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,CONTACT NUMBER,POINT OF CONTACT,AREA,CITY,LINK ADDRESS,REMARKS,RECORDINGS,APPOINTMENT TYPE (YES OR NO),APPOINTMENT DATE,APPOINTMENT TIME,REQUIREMENT ORDER IF ANY,NOTES TO THE COS IF ANY\n'
             + '2026-07-27,,Retail,VercelBranch Biz 1,9000010001,,Area,City,,,,,,,,\n'
-            + '2026-07-27,,Retail,,9000010002,,Area,City,,,,,,,,\n'; // row 2 missing required business name
+            + '2026-07-27,,Retail,,9000010002,,Area,City,,,,,,,,\n' // row 2: blank Business Name — now a warning, not a block
+            + '2026-07-27,,Retail,VercelBranch Biz 3,,,Area,City,,,,,,,,\n'; // row 3: blank Contact Number — still the one real blocker
 
         const uploadRes = await request(app)
             .post('/api/v1/leads/csv/upload')
@@ -83,10 +87,12 @@ describe('Vercel inline (process.env.VERCEL) upload branch', () => {
 
         const final = await pollFor(`/api/v1/leads/csv/logs/${uploadRes.body.data.batchId}`, adminToken);
         expect(final.status).toBe('done');
-        expect(final.successCount).toBe(1);
+        expect(final.successCount).toBe(2);
         expect(final.failedCount).toBe(1);
-        expect(final.errors[0]).toHaveProperty('row');
-        expect(final.errors[0].reason).not.toContain('undefined');
+        expect(final.errors.some(e => e.warning && e.field === 'name')).toBe(true);
+        const realError = final.errors.find(e => !e.warning);
+        expect(realError).toHaveProperty('row');
+        expect(realError.reason).not.toContain('undefined');
     }, 30000);
 
     it('Raw Data: processes inline, reaches done with correct counts', async () => {

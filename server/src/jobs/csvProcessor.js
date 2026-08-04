@@ -117,7 +117,15 @@ function buildBulkInsertSql(rows, verticalId, subVerticalId, defaultAssignedTo, 
  * Emit a progress snapshot to the in-process cache.
  * Called only at batch boundaries (not per-row) to avoid cache churn.
  */
-async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, successCount, errorsArr, duplicateCount) {
+// `failedCountOverride`: the cached snapshot's `failed_count` normally
+// equals `errorsArr.length`, which is correct while `errorsArr` only ever
+// holds genuine blocking failures. The final 'done' snapshot below passes an
+// `errorsArr` that also includes non-blocking warnings (so a client reading
+// from cache sees the same warnings the persisted DB report has — see the
+// phone-number-only-mandatory policy note above `warnings` at the top of
+// this file); pass the real failed-row count explicitly there so it isn't
+// miscounted as `errors.length + warnings.length`.
+async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, successCount, errorsArr, duplicateCount, failedCountOverride) {
     await cacheSet(`csv_progress:${batchId}`, {
         id: batchId,
         uploaded_by: uploadedBy,
@@ -125,7 +133,7 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
         status,
         total_rows: totalRows,
         success_count: successCount,
-        failed_count: errorsArr.length,
+        failed_count: failedCountOverride ?? errorsArr.length,
         duplicate_count: duplicateCount,
         errors: errorsArr,
         operation_type: 'bulk_upload',
@@ -153,6 +161,12 @@ const processCsvJob = async (job) => {
     let successCount = 0;
     let duplicateCount = 0;
     const errors = [];
+    // Phone-number-only-mandatory policy (see CLAUDE.md / rawDataImportSchema.js):
+    // a missing Business/Person/Shop/Company Name used to be a hard reject here.
+    // It's now a non-blocking warning — the row still inserts with an empty
+    // business_name — matching Raw Data/Delivery Data's policy. Only a
+    // missing/invalid phone number blocks a row now.
+    const warnings = [];
     const validLeads = [];
 
     // ── 2. Mark job as in-progress ────────────────────────────────────────────
@@ -261,10 +275,8 @@ const processCsvJob = async (job) => {
             }
 
             if (!rawName.trim()) {
-                const reason = 'Missing business / person / shop / company name';
-                errors.push({ row: rowNum, code: ErrorCodes.MISSING_REQUIRED_FIELD, field: 'name', reason, originalRow: rawRow });
-                rowOutcomes.push({ row: rowNum, status: 'failed', reason });
-                continue;
+                // Not a hard reject — phone number is the only mandatory field now.
+                warnings.push({ row: rowNum, field: 'name', reason: 'Business / Person / Shop / Company name is blank — accepted, left blank' });
             }
 
             if (phoneSet.has(rawPhone)) {
@@ -413,14 +425,22 @@ const processCsvJob = async (job) => {
         }
 
         // ── 9. Finalize ───────────────────────────────────────────────────────
+        // Warnings (e.g. blank Business Name) never blocked insertion — merged
+        // into the persisted report tagged `warning: true` so the downloadable
+        // report/UI can distinguish them from actual failed rows, same pattern
+        // as rawDataProcessor.js/deliveryDataProcessor.js.
+        const persistedEntries = [...errors, ...warnings.map(w => ({ ...w, warning: true }))];
         await query(`
             UPDATE csv_upload_logs
             SET status = 'done', success_count = $1, failed_count = $2,
                 duplicate_count = $3, errors = $4, processing_finished_at = NOW()
             WHERE id = $5
-        `, [successCount, outcomeFailed, duplicateCount, JSON.stringify(errors), batchId]);
+        `, [successCount, outcomeFailed, duplicateCount, JSON.stringify(persistedEntries), batchId]);
 
-        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, errors, duplicateCount);
+        // Cached snapshot now matches the persisted DB report exactly (merged
+        // errors+warnings), with the real failed-row count passed explicitly
+        // so warnings never inflate it — see emitProgress's comment above.
+        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, persistedEntries, duplicateCount, outcomeFailed);
 
         // Invalidate lead list + report caches for this vertical
         invalidateOnLeadChange(verticalId, null).catch(() => {});

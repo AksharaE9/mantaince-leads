@@ -58,13 +58,15 @@ describe('validateDeliveryDataRow', () => {
         expect(assignedUserId).toBe('u3');
     });
 
-    it('reuses the shared-field validator: still requires Date, Business Name, Phone Number, valid Employee Name', () => {
-        const { errors } = validateDeliveryDataRow({ ...baseRow, date: '', businessName: '', phoneNumber: '', employeeName: 'Nobody Here' }, ctx);
-        const fields = errors.map(e => e.field);
-        expect(fields).toContain('date');
-        expect(fields).toContain('businessName');
-        expect(fields).toContain('phoneNumber');
-        expect(fields).toContain('employeeName');
+    // Phone-number-only-mandatory policy (see CLAUDE.md): reuses the shared
+    // Raw Data validator, which now only hard-requires Phone Number — a blank
+    // Date/Business Name/Employee Name is accepted (warned on where
+    // applicable), matching every other section.
+    it('reuses the shared-field validator: requires only Phone Number; blank Date/Business Name/unresolved Employee Name warn instead of block', () => {
+        const { errors, warnings } = validateDeliveryDataRow({ ...baseRow, date: '', businessName: '', phoneNumber: '', employeeName: 'Nobody Here' }, ctx);
+        const errorFields = errors.map(e => e.field);
+        expect(errorFields).toEqual(['phoneNumber']);
+        expect(warnings.some(w => w.field === 'employeeName')).toBe(true);
     });
 
     it('does not require Delivery Date', () => {
@@ -72,9 +74,22 @@ describe('validateDeliveryDataRow', () => {
         expect(errors.some(e => e.field === 'deliveryDate')).toBe(false);
     });
 
-    it('rejects an unparseable Delivery Date', () => {
-        const { errors } = validateDeliveryDataRow({ ...baseRow, deliveryDate: 'not-a-date' }, ctx);
-        expect(errors.some(e => e.field === 'deliveryDate')).toBe(true);
+    // Step 3 of the phone-number-only-mandatory policy: a present-but-
+    // unparseable Delivery Date is a warning, not a hard reject — the row
+    // still inserts with that field left blank. This is the exact field/
+    // error message ("Delivery Date is not a valid date") that hard-blocked
+    // all 55 rows of the real Delivery Data upload this fix responds to.
+    it('warns (does not reject) on an unparseable Delivery Date', () => {
+        const { errors, warnings } = validateDeliveryDataRow({ ...baseRow, deliveryDate: 'not-a-date' }, ctx);
+        expect(errors.some(e => e.field === 'deliveryDate')).toBe(false);
+        expect(warnings.some(w => w.field === 'deliveryDate')).toBe(true);
+    });
+
+    it('parses the real-world DD-MM-YY / DD-MM-YYYY dash formats from the failed upload with no "unparseable" warning', () => {
+        // deliberately on/after baseRow's Date and Appointment Date so this
+        // isolates the parse check from the separate "earlier than" warning.
+        const { warnings } = validateDeliveryDataRow({ ...baseRow, deliveryDate: '05-08-2026' }, ctx);
+        expect(warnings.some(w => w.field === 'deliveryDate' && /could not be parsed/.test(w.message))).toBe(false);
     });
 
     it('does not require Delivery Time', () => {

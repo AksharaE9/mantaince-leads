@@ -57,12 +57,14 @@ export { getAssignableAgents };
  * the Delivery Date consistency rule on top.
  */
 export function validateDeliveryDataRow(row, { agents, knownBusinessTypes }) {
-    const { errors, warnings, assignedUserId } = validateRawDataRow(row, { agents, knownBusinessTypes });
+    const { errors, warnings, assignedUserId, employeeNameRaw } = validateRawDataRow(row, { agents, knownBusinessTypes });
 
     const deliveryDateRaw = row.deliveryDate;
     const deliveryDateValue = deliveryDateRaw === undefined || deliveryDateRaw === null ? '' : String(deliveryDateRaw).trim();
+    // Present-but-unparseable is a warning, not a hard reject — same
+    // phone-number-only-mandatory policy as every other date field.
     if (deliveryDateValue && !parseFlexibleDate(deliveryDateValue)) {
-        errors.push({ field: 'deliveryDate', message: 'Delivery Date is not a valid date' });
+        warnings.push({ field: 'deliveryDate', message: `Delivery Date ("${deliveryDateValue}") could not be parsed as a date — accepted, left blank` });
     }
 
     const deliveryTimeRaw = row.deliveryTime;
@@ -83,7 +85,7 @@ export function validateDeliveryDataRow(row, { agents, knownBusinessTypes }) {
         warnings.push({ field: 'deliveryDate', message: 'Delivery Date is earlier than the Appointment Date — accepted, please verify' });
     }
 
-    return { errors, warnings, assignedUserId };
+    return { errors, warnings, assignedUserId, employeeNameRaw };
 }
 
 // ── linkedRawDataId auto-matching ───────────────────────────────────────────

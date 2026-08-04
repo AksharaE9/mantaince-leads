@@ -1475,10 +1475,9 @@ export const FollowUpsPositivesPage = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">BUSINESS / PERSON / SHOP / COMPANY NAME *</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">BUSINESS / PERSON / SHOP / COMPANY NAME</span>
                     <input
                       type="text"
-                      required
                       value={leadFormName}
                       onChange={(e) => {
                         setLeadFormName(e.target.value);

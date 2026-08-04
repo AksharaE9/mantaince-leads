@@ -1,5 +1,6 @@
 import { query } from '../config/db.js';
 import { isValidUUID } from '../utils/validators/index.js';
+import { resolveEmployeeName as resolveEmployeeNameShared } from '../utils/employeeMatch.js';
 
 /**
  * Shared schema for the "Raw Data" import feature — single source of truth
@@ -24,14 +25,23 @@ import { isValidUUID } from '../utils/validators/index.js';
  *   reject — there's no existing business-rule precedent in this app to
  *   confirm a hard block is correct, and the prompt's own fallback for an
  *   unconfirmed rule is to warn rather than block.
+ * - Phone-number-only-mandatory policy (see CLAUDE.md / diagnosis of the
+ *   55-row Delivery Data upload failure): Date and Business Name used to be
+ *   `required: true` here. A real bulk upload with valid data (dash-format
+ *   dates the old parser didn't handle, and business names that were
+ *   present) was rejected wholesale by this over-strict rule combined with
+ *   a parser gap — not by genuinely bad source data. `phoneNumber` is now
+ *   the only `required: true` field in this schema; every other field
+ *   (including Date and Business Name) is optional and, if present but
+ *   unparseable/invalid, degrades to a warning rather than a hard reject.
  */
 const DISPLAY_ADRESS_AS_TYPO = false;
 
 export const RAW_DATA_FIELDS = [
-    { key: 'date', label: 'Date', csvHeader: 'Date', type: 'date', required: true },
+    { key: 'date', label: 'Date', csvHeader: 'Date', type: 'date', required: false },
     { key: 'employeeName', label: 'Employee Name', csvHeader: 'Employee Name', type: 'string', required: false, resolvesToUser: true },
     { key: 'businessType', label: 'Business Type', csvHeader: 'Business Type', type: 'string', required: false },
-    { key: 'businessName', label: 'Business Name', csvHeader: 'Business Name', type: 'string', required: true, maxLength: 255 },
+    { key: 'businessName', label: 'Business Name', csvHeader: 'Business Name', type: 'string', required: false, maxLength: 255 },
     { key: 'area', label: 'Area', csvHeader: 'Area', type: 'string', required: false },
     { key: 'city', label: 'City', csvHeader: 'City', type: 'string', required: false },
     { key: 'phoneNumber', label: 'Phone Number', csvHeader: 'Phone Number', type: 'phone', required: true },
@@ -58,74 +68,83 @@ export async function getKnownBusinessTypes(verticalId) {
     return new Set(res.rows.map(r => r.business_type.toLowerCase()));
 }
 
-// ── Levenshtein distance — used only to suggest "closest matches" for an
-// unresolved Employee Name, never to auto-pick one. ─────────────────────────
-function levenshtein(a, b) {
-    const m = a.length, n = b.length;
-    const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
-    for (let j = 0; j <= n; j++) dp[0][j] = j;
-    for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-            dp[i][j] = a[i - 1] === b[j - 1]
-                ? dp[i - 1][j - 1]
-                : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-        }
-    }
-    return dp[m][n];
-}
-
 /**
- * Resolves a free-text employee name to exactly one user, or returns a
- * rejection with suggestions. Never guesses when there's ambiguity.
+ * Resolves a free-text employee name to zero or one user. Delegates to the
+ * shared matcher (server/src/utils/employeeMatch.js) so Raw Data, Delivery
+ * Data, and COS/Positives bulk upload can never disagree about what counts
+ * as a confident match. Re-exported under this module's original name so
+ * every existing import site keeps working unchanged.
+ *
+ * Phone-number-only-mandatory policy: this NEVER returns a hard rejection
+ * anymore — an unresolved/ambiguous/blank name comes back as
+ * `{ userId: null, warning }` and the row proceeds unassigned, not blocked.
  */
-export function resolveEmployeeName(name, agents) {
-    const clean = (name || '').trim().toLowerCase();
-    if (!clean) return { userId: null };
-
-    const exact = agents.filter(a => a.name.trim().toLowerCase() === clean);
-    if (exact.length === 1) return { userId: exact[0].id };
-    if (exact.length > 1) {
-        return { error: `Multiple employees named "${name}" exist — cannot resolve unambiguously. Matches: ${exact.map(a => a.name).join(', ')}` };
-    }
-
-    const substring = agents.filter(a => a.name.toLowerCase().includes(clean) || clean.includes(a.name.toLowerCase()));
-    if (substring.length === 1) return { userId: substring[0].id };
-    if (substring.length > 1) {
-        return { error: `No exact match for employee "${name}" — closest matches: ${substring.map(a => a.name).join(', ')}` };
-    }
-
-    // Rank all agents by edit distance and surface the closest few as suggestions.
-    const ranked = agents
-        .map(a => ({ agent: a, distance: levenshtein(clean, a.name.toLowerCase()) }))
-        .sort((x, y) => x.distance - y.distance)
-        .slice(0, 3)
-        .filter(r => r.distance <= Math.max(3, Math.floor(clean.length / 2)));
-
-    if (ranked.length > 0) {
-        return { error: `No matching employee found for "${name}" — closest matches: ${ranked.map(r => r.agent.name).join(', ')}` };
-    }
-    return { error: `No matching employee found for "${name}"` };
-}
+export const resolveEmployeeName = resolveEmployeeNameShared;
 
 const PHONE_REGEX = /^\+?\d{7,15}$/;
 
+// Excel's native serial-date encoding is days since 1899-12-30 (the
+// standard correction that absorbs Excel's fictitious Feb-29-1900 leap
+// day). Bounds chosen so a bare typed year ("2026") or a small quantity
+// ("12") can never be misread as a serial date — real-world spreadsheet
+// serials for 1928-2064 land in [10000, 60000).
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
+const MS_PER_DAY = 86_400_000;
+
 export function parseFlexibleDate(value) {
-    if (!value) return null;
+    if (value === undefined || value === null || value === '') return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
     const str = String(value).trim();
+    if (!str) return null;
+
     // ISO / yyyy-mm-dd first (unambiguous)
     const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
     if (iso) {
         const d = new Date(Date.UTC(+iso[1], +iso[2] - 1, +iso[3]));
         return Number.isNaN(d.getTime()) ? null : d;
     }
-    // dd/mm/yyyy — the rest of this app's date filters use ISO inputs; for
-    // slash-separated dates we assume DD/MM/YYYY (the locale field staff in
-    // this app's existing forms use), not MM/DD/YYYY.
-    const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(str);
-    if (slash) {
-        const d = new Date(Date.UTC(+slash[3], +slash[2] - 1, +slash[1]));
-        return Number.isNaN(d.getTime()) ? null : d;
+
+    // dd/mm/yyyy or dd-mm-yyyy (4-digit year) — the rest of this app's date
+    // filters use ISO inputs; for ambiguous separated dates we assume
+    // DD-MM-YYYY (the locale field staff in this app's existing forms and
+    // uploaded files use), not MM-DD-YYYY. Both '/' and '-' separators are
+    // accepted — real uploads use both interchangeably (see the "23-06-26" /
+    // "26-06-2026" real-world example that broke the old slash-only parser).
+    const dmy4 = /^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$/.exec(str);
+    if (dmy4) {
+        const day = +dmy4[1], month = +dmy4[2], year = +dmy4[3];
+        if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            const d = new Date(Date.UTC(year, month - 1, day));
+            return Number.isNaN(d.getTime()) ? null : d;
+        }
     }
+
+    // dd/mm/yy or dd-mm-yy (2-digit year) — this is the exact format the
+    // real failed 55-row Delivery Data upload used for its "Date" column
+    // ("23-06-26"). 2-digit years are windowed 1970-2069 (standard
+    // POSIX/spreadsheet convention: <70 => 20xx, >=70 => 19xx).
+    const dmy2 = /^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})$/.exec(str);
+    if (dmy2) {
+        const day = +dmy2[1], month = +dmy2[2], yy = +dmy2[3];
+        if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            const year = yy < 70 ? 2000 + yy : 1900 + yy;
+            const d = new Date(Date.UTC(year, month - 1, day));
+            return Number.isNaN(d.getTime()) ? null : d;
+        }
+    }
+
+    // Excel serial-date number — happens when a CSV export (or an .xlsx
+    // cell exceljs doesn't recognize as a Date-typed cell) carries the raw
+    // numeric day-count instead of a formatted date string.
+    if (/^\d+(\.\d+)?$/.test(str)) {
+        const serial = parseFloat(str);
+        if (serial >= 10000 && serial < 60000) {
+            const d = new Date(EXCEL_EPOCH_MS + Math.round(serial) * MS_PER_DAY);
+            return Number.isNaN(d.getTime()) ? null : d;
+        }
+    }
+
     const generic = new Date(str);
     return Number.isNaN(generic.getTime()) ? null : generic;
 }
@@ -147,6 +166,10 @@ export function validateRawDataRow(row, { agents, knownBusinessTypes }) {
         const raw = row[field.key];
         const value = raw === undefined || raw === null ? '' : String(raw).trim();
 
+        // Phone-number-only-mandatory policy: `required` today only ever
+        // means `phoneNumber` (see RAW_DATA_FIELDS above) — kept generic
+        // here rather than hardcoding the key, so a future required field
+        // doesn't need this function edited too.
         if (field.required && !value) {
             errors.push({ field: field.key, message: `${field.label} is required` });
             continue;
@@ -156,21 +179,25 @@ export function validateRawDataRow(row, { agents, knownBusinessTypes }) {
         if (field.type === 'phone' && !PHONE_REGEX.test(value.replace(/[^\d+]/g, ''))) {
             errors.push({ field: field.key, message: `${field.label} is not a valid phone number` });
         }
+        // A present-but-unparseable date is a warning, not a hard reject —
+        // the row still inserts with that field left null (see file header
+        // "phone-number-only-mandatory policy" note).
         if (field.type === 'date' && !parseFlexibleDate(value)) {
-            errors.push({ field: field.key, message: `${field.label} is not a valid date` });
+            warnings.push({ field: field.key, message: `${field.label} ("${value}") could not be parsed as a date — accepted, left blank` });
         }
         if (field.maxLength && value.length > field.maxLength) {
             errors.push({ field: field.key, message: `${field.label} exceeds ${field.maxLength} characters` });
         }
     }
 
-    // Employee Name → assignedUserId (never stored as free text)
-    let assignedUserId = null;
+    // Employee Name → assignedUserId, best-effort. Never blocks the row:
+    // unresolved/ambiguous/blank names come back as a warning (or nothing,
+    // if blank) with assignedUserId left null, never an error.
     const nameResult = resolveEmployeeName(row.employeeName, agents);
-    if (nameResult.error) {
-        errors.push({ field: 'employeeName', message: nameResult.error });
-    } else {
-        assignedUserId = nameResult.userId;
+    const assignedUserId = nameResult.userId;
+    const employeeNameRaw = nameResult.rawName || '';
+    if (nameResult.warning) {
+        warnings.push({ field: 'employeeName', message: nameResult.warning });
     }
 
     // Business Type: accept-and-flag new values (no hard-reject — no canonical list exists)
@@ -186,7 +213,7 @@ export function validateRawDataRow(row, { agents, knownBusinessTypes }) {
         warnings.push({ field: 'appointmentDate', message: 'Appointment Date is earlier than the visit Date — accepted, please verify' });
     }
 
-    return { errors, warnings, assignedUserId };
+    return { errors, warnings, assignedUserId, employeeNameRaw };
 }
 
 // ── List/export filter & sort helpers ──────────────────────────────────────

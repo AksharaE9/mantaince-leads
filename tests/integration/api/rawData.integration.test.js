@@ -211,7 +211,10 @@ describe('Raw Data API', () => {
             expect(res.body.data.assigned_user_id).toBe(agentId);
         });
 
-        it('rejects with structured errors (422) when required fields are missing — never a bare 500', async () => {
+        // Phone-number-only-mandatory policy (see CLAUDE.md / MissingFieldDataDiagnosis
+        // follow-up on the 55-row Delivery Data upload failure): Business Name is no
+        // longer required — Phone Number is the only field that still blocks a row.
+        it('rejects with structured errors (422) when Phone Number is missing — never a bare 500', async () => {
             const res = await request(app)
                 .post('/api/v1/raw-data')
                 .set('Authorization', `Bearer ${adminToken}`)
@@ -219,10 +222,22 @@ describe('Raw Data API', () => {
                 .expect(422);
             expect(res.body.success).toBe(false);
             expect(Array.isArray(res.body.errors)).toBe(true);
-            expect(res.body.errors.some(e => e.field === 'businessName')).toBe(true);
+            expect(res.body.errors.some(e => e.field === 'phoneNumber')).toBe(true);
         });
 
-        it('rejects when the employee name cannot be resolved, naming the problem field', async () => {
+        it('accepts a blank Business Name — no longer a required field', async () => {
+            const res = await request(app)
+                .post('/api/v1/raw-data')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({ verticalId, date: '2026-07-24', employeeName: 'Super Admin', phoneNumber: '9876500003' })
+                .expect(201);
+            expect(res.body.data.business_name).toBeNull();
+        });
+
+        // Step 2: an unresolved Employee Name is a non-blocking warning now,
+        // never a hard reject — the row still inserts, unassigned, with the
+        // originally-typed name preserved for audit.
+        it('accepts (with a warning) an employee name that cannot be resolved, and preserves the raw text', async () => {
             const res = await request(app)
                 .post('/api/v1/raw-data')
                 .set('Authorization', `Bearer ${adminToken}`)
@@ -230,8 +245,10 @@ describe('Raw Data API', () => {
                     verticalId, date: '2026-07-24', employeeName: 'Totally Nobody',
                     businessName: 'Acme Traders', phoneNumber: '9876500002',
                 })
-                .expect(422);
-            expect(res.body.errors.some(e => e.field === 'employeeName')).toBe(true);
+                .expect(201);
+            expect(res.body.data.assigned_user_id).toBeNull();
+            expect(res.body.data.employee_name_raw).toBe('Totally Nobody');
+            expect(res.body.warnings.some(w => w.field === 'employeeName')).toBe(true);
         });
 
         it('rejects a duplicate phone number within the same vertical', async () => {
@@ -269,12 +286,18 @@ describe('Raw Data API', () => {
                 .expect(400);
         });
 
-        it('accepts a well-formed CSV upload, queues it, and the processor inserts valid rows while rejecting unresolvable ones', async () => {
+        it('accepts a well-formed CSV upload, queues it, and the processor inserts both rows — an unresolvable employee name is a warning, not a rejection', async () => {
             // The background worker loop is disabled under NODE_ENV=test (see
             // server/src/app.js), so this test drives the queue -> process
             // pipeline the same way worker.js does: queue via the real HTTP
             // endpoint, then invoke the real processor directly (not a mock)
             // against the same batch row.
+            //
+            // Phone-number-only-mandatory policy: "Nobody Matches" used to hard-
+            // block this row (see MissingFieldDataDiagnosis.md's 55-row Delivery
+            // Data upload — the same "No matching employee found" failure mode).
+            // It's now a warning; the row inserts unassigned, with the raw name
+            // preserved in employee_name_raw.
             const csv = 'Date,Employee Name,Business Type,Business Name,Area,City,Phone Number,Address,Appointment Date,Appointment Timings,Remarks\n'
                 + '2026-07-24,Super Admin,Retail,Bulk Acme,Whitefield,Bengaluru,9876511111,123 Main St,2026-08-01,10:00 AM,Test row\n'
                 + '2026-07-24,Nobody Matches,Retail,Bad Row,Whitefield,Bengaluru,9876511112,123 Main St,,,\n';
@@ -302,13 +325,17 @@ describe('Raw Data API', () => {
 
             const finalLog = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
             expect(finalLog.status).toBe('done');
-            expect(finalLog.success_count).toBe(1);
-            expect(finalLog.failed_count).toBeGreaterThanOrEqual(1);
+            expect(finalLog.success_count).toBe(2);
+            expect(finalLog.failed_count).toBe(0);
+            expect((finalLog.errors || []).some(e => e.warning && e.field === 'employeeName')).toBe(true);
 
-            const inserted = await query('SELECT * FROM raw_data WHERE csv_batch_id = $1', [batchId]);
-            expect(inserted.rows).toHaveLength(1);
-            expect(inserted.rows[0].assigned_user_id).toBe(agentId);
-            expect(inserted.rows[0].business_name).toBe('Bulk Acme');
+            const inserted = await query('SELECT * FROM raw_data WHERE csv_batch_id = $1 ORDER BY business_name', [batchId]);
+            expect(inserted.rows).toHaveLength(2);
+            const resolved = inserted.rows.find(r => r.business_name === 'Bulk Acme');
+            const unresolved = inserted.rows.find(r => r.business_name === 'Bad Row');
+            expect(resolved.assigned_user_id).toBe(agentId);
+            expect(unresolved.assigned_user_id).toBeNull();
+            expect(unresolved.employee_name_raw).toBe('Nobody Matches');
         }, 20000);
     });
 });

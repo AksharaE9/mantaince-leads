@@ -146,6 +146,12 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'delivery_data' AND column_name = 'delivery_date' AND is_nullable = 'YES'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'raw_data' AND column_name = 'employee_name_raw'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'raw_data' AND column_name = 'business_name' AND is_nullable = 'YES'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -638,6 +644,25 @@ const runMigrations = async () => {
         -- Make delivery date & delivery time optional on existing tables
         ALTER TABLE delivery_data ALTER COLUMN delivery_date DROP NOT NULL;
         ALTER TABLE delivery_data ALTER COLUMN delivery_time DROP NOT NULL;
+
+        -- Phone-number-only-mandatory policy (see CLAUDE.md / MissingFieldDataDiagnosis
+        -- follow-up on the 55-row Delivery Data upload failure): Business Name is no
+        -- longer required in the app-level schema (rawDataImportSchema.js /
+        -- deliveryDataImportSchema.js), but both tables still had a NOT NULL
+        -- constraint left over from when it was — an insert with a blank Business
+        -- Name would otherwise still hard-fail at the DB layer even though the
+        -- validator now accepts it. Dropped here, same precedent as the
+        -- delivery_date/delivery_time fix immediately above.
+        ALTER TABLE raw_data ALTER COLUMN business_name DROP NOT NULL;
+        ALTER TABLE delivery_data ALTER COLUMN business_name DROP NOT NULL;
+
+        -- Employee Name soft-match (see server/src/utils/employeeMatch.js): an
+        -- unresolved/ambiguous Employee Name no longer blocks the row, but the
+        -- originally-typed text must still be retained for audit rather than
+        -- silently lost. Nullable, no default — most rows resolve cleanly and
+        -- leave this blank.
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS employee_name_raw VARCHAR(255);
+        ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS employee_name_raw VARCHAR(255);
 
         -- Real-time sync change log, polled by clients (replaces SSE — Vercel's
         -- legacy builds/routes @vercel/node config never actually streams

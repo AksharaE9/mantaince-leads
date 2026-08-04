@@ -10,6 +10,7 @@ import {
     findLinkedRawDataBatch,
     resolveLinkedRawDataId,
 } from '../services/deliveryDataImportSchema.js';
+import { parseFlexibleDate } from '../services/rawDataImportSchema.js';
 import { bulkInsert } from '../db/bulkInsert.js';
 import { ErrorCodes } from '../utils/operationError.js';
 import { logger } from '../lib/logger.js';
@@ -20,7 +21,7 @@ const DELIVERY_DATA_COLUMNS = [
     'id', 'vertical_id', 'assigned_user_id', 'date', 'business_type', 'business_name',
     'area', 'city', 'phone_number', 'address', 'appointment_date', 'appointment_timings',
     'remarks', 'delivery_date', 'delivery_time', 'linked_raw_data_id',
-    'source', 'csv_batch_id', 'created_by',
+    'source', 'csv_batch_id', 'created_by', 'employee_name_raw',
 ];
 
 function normalizeRowKeys(rawRow) {
@@ -59,11 +60,9 @@ function toSchemaKeyedRow(normalizedRawRow) {
     return row;
 }
 
-function toDateOrNull(value) {
-    if (!value) return null;
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
-}
+// See rawDataProcessor.js for why this delegates to the shared flexible
+// parser instead of a local, weaker `new Date(value)`.
+const toDateOrNull = parseFlexibleDate;
 
 // Composite dedup key built from raw trimmed string values, deliberately not
 // re-parsed to a Date object — sidesteps the exceljs local-timezone gotcha
@@ -76,7 +75,12 @@ function deliveryDupKey(phone, deliveryDateValue, deliveryTimeValue) {
     return `${p}|${d}|${t}`;
 }
 
-async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, successCount, errorsArr, duplicateCount) {
+// `failedCountOverride`: see csvProcessor.js's identical helper for why this
+// exists — the final 'done' snapshot passes an `errorsArr` merged with
+// non-blocking warnings so cache readers see the same report the DB has,
+// and the real failed-row count must be passed explicitly so it isn't
+// miscounted as `errors.length + warnings.length`.
+async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, successCount, errorsArr, duplicateCount, failedCountOverride) {
     await cacheSet(`csv_progress:${batchId}`, {
         id: batchId,
         uploaded_by: uploadedBy,
@@ -84,7 +88,7 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
         status,
         total_rows: totalRows,
         success_count: successCount,
-        failed_count: errorsArr.length,
+        failed_count: failedCountOverride ?? errorsArr.length,
         duplicate_count: duplicateCount,
         errors: errorsArr,
         operation_type: 'bulk_upload',
@@ -165,7 +169,7 @@ export const processDeliveryDataJob = async (job) => {
         rows.forEach((rawRow, idx) => {
             const rowNum = idx + 2; // +2: header row + 1-based
             const row = normalizedRows[idx];
-            const { errors: rowErrors, warnings: rowWarnings, assignedUserId } = validateDeliveryDataRow(row, { agents, knownBusinessTypes });
+            const { errors: rowErrors, warnings: rowWarnings, assignedUserId, employeeNameRaw } = validateDeliveryDataRow(row, { agents, knownBusinessTypes });
 
             for (const w of rowWarnings) warnings.push({ row: rowNum, field: w.field, reason: w.message });
 
@@ -196,7 +200,7 @@ export const processDeliveryDataJob = async (job) => {
                 assigned_user_id: assignedUserId,
                 date: toDateOrNull(row.date),
                 business_type: row.businessType || null,
-                business_name: row.businessName,
+                business_name: row.businessName || null,
                 area: row.area || null,
                 city: row.city || null,
                 phone_number: phone,
@@ -210,6 +214,7 @@ export const processDeliveryDataJob = async (job) => {
                 source: 'bulk_upload',
                 csv_batch_id: batchId,
                 created_by: uploadedBy,
+                employee_name_raw: employeeNameRaw || null,
                 csvRowNum: rowNum,
                 originalRow: rawRow,
             });
@@ -259,14 +264,19 @@ export const processDeliveryDataJob = async (job) => {
             console.error(`[DeliveryData Processor] MISMATCH warning: totalRows (${totalRows}) !== outcomeTotal (${outcomeTotal})`);
         }
 
-        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, errors, duplicateCount);
+        // Cached snapshot matches the persisted DB report exactly (merged
+        // errors+warnings); real failed-row count passed explicitly so
+        // warnings never inflate it — see emitProgress's comment above.
+        // (Also collapses what used to be two identical, redundant
+        // emitProgress('done', ...) calls back to back into one.)
+        const persistedEntries = [...errors, ...warnings.map(w => ({ ...w, warning: true }))];
         await query(`
             UPDATE csv_upload_logs
             SET status = 'done', success_count = $1, failed_count = $2, duplicate_count = $3, errors = $4, processing_finished_at = NOW()
             WHERE id = $5
-        `, [successCount, outcomeFailed, duplicateCount, JSON.stringify([...errors, ...warnings.map(w => ({ ...w, warning: true }))]), batchId]);
+        `, [successCount, outcomeFailed, duplicateCount, JSON.stringify(persistedEntries), batchId]);
 
-        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, errors, duplicateCount);
+        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, persistedEntries, duplicateCount, outcomeFailed);
         broadcastToAll({ type: 'DELIVERY_DATA_MUTATED', verticalId, action: 'bulk_upload', batchId });
     } catch (error) {
         logger.error({ correlationId: batchId, section: 'delivery_data', operation: 'bulk_upload', verticalId, uploadedBy, err: { message: error.message, stack: error.stack } }, `[deliveryDataProcessor] job ${batchId} failed: ${error.message}`);

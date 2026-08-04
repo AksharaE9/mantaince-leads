@@ -309,9 +309,12 @@ export const createCostConversion = async (req, res) => {
         const gAcc = geotagAccuracy ? parseFloat(geotagAccuracy) : null;
         const gCap = geotagCapturedAt ? new Date(geotagCapturedAt) : null;
 
-        if (!name || !name.trim()) {
-            return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'Business / Person / Shop / Company name is mandatory', section, operation: 'single_add', field: 'name' });
-        }
+        // Phone-number-only-mandatory policy (see CLAUDE.md): Business/Person/
+        // Shop/Company Name is no longer required — a blank name falls back to
+        // businessName, then to '' (cost_conversions.name is NOT NULL, so an
+        // empty string rather than NULL keeps the insert below valid without
+        // widening the DB constraint).
+        const safeName = (name && name.trim()) ? name.trim() : ((businessName && businessName.trim()) ? businessName.trim() : '');
         if (!phone || !phone.toString().trim()) {
             return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'Contact number is mandatory', section, operation: 'single_add', field: 'phone' });
         }
@@ -353,7 +356,7 @@ export const createCostConversion = async (req, res) => {
             (subVerticalId && isValidUUID(subVerticalId)) ? subVerticalId : null,
             (assignedTo    && isValidUUID(assignedTo))    ? assignedTo    : null,
             req.user.sub,
-            name, businessName || '', JSON.stringify(data),
+            safeName, businessName || '', JSON.stringify(data),
             leadType || 'CALL',
             gLat, gLng, gAcc,
             geotagPhotoKey || null,
@@ -511,8 +514,11 @@ export const updateCostConversion = async (req, res) => {
 
 
 
-        if (updates.name !== undefined && (!updates.name || !updates.name.trim())) {
-            return res.status(400).json({ success: false, error: 'Business / Person / Shop / Company name is mandatory' });
+        // Phone-number-only-mandatory policy: an edit clearing the name to
+        // blank is allowed — normalize to '' rather than reject (cost_conversions.name
+        // is NOT NULL; the column update path below only ever sends strings, never NULL).
+        if (updates.name !== undefined) {
+            updates.name = (updates.name || '').trim();
         }
         if (updates.phone !== undefined) {
             const sanitizedPhone = updates.phone.toString().replace(/[^\d+]/g, '').trim();
@@ -985,8 +991,12 @@ export const createCostConversionBulk = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
 
+        // Phone-number-only-mandatory policy (see CLAUDE.md): `name` used to be
+        // required here; it's now optional like businessName, consistent with
+        // every other bulk-add path in this app. `phone` remains the only
+        // required field.
         const CostConversionSchema = z.object({
-            name: z.string().min(1, 'Name is required').max(255),
+            name: z.string().max(255).optional().nullable().transform(val => val || ''),
             phone: z.string().min(1, 'Contact number is required').transform(val => val.replace(/[^\d+]/g, '').trim()).refine(val => val.length > 0, 'Contact number cannot be empty'),
             businessName: z.string().optional().nullable().transform(val => val || ''),
             subVerticalId: z.string().uuid().optional().nullable(),

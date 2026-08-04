@@ -1153,9 +1153,9 @@ export const LeadsPage = () => {
                     />
                   </FormField>
 
-                  <FormField label="BUSINESS / PERSON / SHOP / COMPANY NAME *">
+                  <FormField label="BUSINESS / PERSON / SHOP / COMPANY NAME">
                     <input
-                      required
+                      placeholder="-"
                       value={leadFormName}
                       onChange={(event) => {
                         setLeadFormName(event.target.value);

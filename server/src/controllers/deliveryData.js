@@ -18,6 +18,7 @@ import {
     buildDeliveryDataFilters,
     resolveDeliveryDataSortColumn,
 } from '../services/deliveryDataImportSchema.js';
+import { parseFlexibleDate } from '../services/rawDataImportSchema.js';
 import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -198,7 +199,7 @@ export const createDeliveryData = async (req, res) => {
             deliveryTime: req.body.deliveryTime,
         };
 
-        const { errors, warnings, assignedUserId } = validateDeliveryDataRow(row, { agents, knownBusinessTypes });
+        const { errors, warnings, assignedUserId, employeeNameRaw } = validateDeliveryDataRow(row, { agents, knownBusinessTypes });
         if (errors.length > 0) {
             return operationError(res, {
                 status: 422, code: ErrorCodes.VALIDATION_FAILED,
@@ -218,16 +219,18 @@ export const createDeliveryData = async (req, res) => {
             INSERT INTO delivery_data (
                 id, vertical_id, assigned_user_id, date, business_type, business_name,
                 area, city, phone_number, address, appointment_date, appointment_timings,
-                remarks, delivery_date, delivery_time, linked_raw_data_id, source, created_by
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'single_add',$17)
+                remarks, delivery_date, delivery_time, linked_raw_data_id, source, created_by, employee_name_raw
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'single_add',$17,$18)
             RETURNING *
         `, [
             id, verticalId, assignedUserId,
-            row.date || null, row.businessType || null, row.businessName,
+            // See rawData.js's createRawData for why this uses the shared
+            // flexible parser instead of handing the raw string to Postgres.
+            parseFlexibleDate(row.date), row.businessType || null, row.businessName || null,
             row.area || null, row.city || null, phone, row.address || null,
-            row.appointmentDate || null, row.appointmentTimings || null,
-            row.remarks || null, row.deliveryDate || null, row.deliveryTime || null,
-            linkResult.linkedRawDataId, req.user.sub,
+            parseFlexibleDate(row.appointmentDate), row.appointmentTimings || null,
+            row.remarks || null, parseFlexibleDate(row.deliveryDate), row.deliveryTime || null,
+            linkResult.linkedRawDataId, req.user.sub, employeeNameRaw || null,
         ]);
 
         logAudit(req, { action: 'delivery_data.create', targetCollection: 'delivery_data', targetId: id, after: insertRes.rows[0] });

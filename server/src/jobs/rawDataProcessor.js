@@ -3,7 +3,7 @@ import { query } from '../config/db.js';
 import { cacheSet } from '../services/cache.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { parseUploadBuffer } from '../services/spreadsheetParser.js';
-import { validateRawDataRow, getAssignableAgents, getKnownBusinessTypes } from '../services/rawDataImportSchema.js';
+import { validateRawDataRow, getAssignableAgents, getKnownBusinessTypes, parseFlexibleDate } from '../services/rawDataImportSchema.js';
 import { bulkInsert } from '../db/bulkInsert.js';
 import { ErrorCodes } from '../utils/operationError.js';
 import { logger } from '../lib/logger.js';
@@ -13,7 +13,7 @@ const BATCH_SIZE = 500;
 const RAW_DATA_COLUMNS = [
     'id', 'vertical_id', 'assigned_user_id', 'date', 'business_type', 'business_name',
     'area', 'city', 'phone_number', 'address', 'appointment_date', 'appointment_timings',
-    'remarks', 'source', 'csv_batch_id', 'created_by',
+    'remarks', 'source', 'csv_batch_id', 'created_by', 'employee_name_raw',
 ];
 
 function normalizeRowKeys(rawRow) {
@@ -50,13 +50,20 @@ function toSchemaKeyedRow(normalizedRawRow) {
     return row;
 }
 
-function toDateOrNull(value) {
-    if (!value) return null;
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
-}
+// Delegates to the same flexible parser the validator uses (ISO,
+// DD-MM-YYYY/DD-MM-YY, Excel serial numbers) — using a weaker local
+// `new Date(value)` here (the pre-fix behavior) meant a row could pass
+// validation with a date the validator accepted but then silently store
+// null (or a wrong date) at insert time, a real inconsistency this fix
+// closes.
+const toDateOrNull = parseFlexibleDate;
 
-async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, successCount, errorsArr, duplicateCount) {
+// `failedCountOverride`: see csvProcessor.js's identical helper for why this
+// exists — the final 'done' snapshot passes an `errorsArr` merged with
+// non-blocking warnings so cache readers see the same report the DB has,
+// and the real failed-row count must be passed explicitly so it isn't
+// miscounted as `errors.length + warnings.length`.
+async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, successCount, errorsArr, duplicateCount, failedCountOverride) {
     await cacheSet(`csv_progress:${batchId}`, {
         id: batchId,
         uploaded_by: uploadedBy,
@@ -64,7 +71,7 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
         status,
         total_rows: totalRows,
         success_count: successCount,
-        failed_count: errorsArr.length,
+        failed_count: failedCountOverride ?? errorsArr.length,
         duplicate_count: duplicateCount,
         errors: errorsArr,
         operation_type: 'bulk_upload',
@@ -133,7 +140,7 @@ export const processRawDataJob = async (job) => {
         rows.forEach((rawRow, idx) => {
             const rowNum = idx + 2; // +2: header row + 1-based
             const row = normalizedRows[idx];
-            const { errors: rowErrors, warnings: rowWarnings, assignedUserId } = validateRawDataRow(row, { agents, knownBusinessTypes });
+            const { errors: rowErrors, warnings: rowWarnings, assignedUserId, employeeNameRaw } = validateRawDataRow(row, { agents, knownBusinessTypes });
 
             for (const w of rowWarnings) warnings.push({ row: rowNum, field: w.field, reason: w.message });
 
@@ -160,7 +167,7 @@ export const processRawDataJob = async (job) => {
                 assigned_user_id: assignedUserId,
                 date: toDateOrNull(row.date),
                 business_type: row.businessType || null,
-                business_name: row.businessName,
+                business_name: row.businessName || null,
                 area: row.area || null,
                 city: row.city || null,
                 phone_number: phone,
@@ -171,6 +178,7 @@ export const processRawDataJob = async (job) => {
                 source: 'bulk_upload',
                 csv_batch_id: batchId,
                 created_by: uploadedBy,
+                employee_name_raw: employeeNameRaw || null,
                 csvRowNum: rowNum,
                 originalRow: rawRow,
             });
@@ -220,12 +228,16 @@ export const processRawDataJob = async (job) => {
             console.error(`[RawData Processor] MISMATCH warning: totalRows (${totalRows}) !== outcomeTotal (${outcomeTotal})`);
         }
 
-        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, errors, duplicateCount);
+        // Cached snapshot matches the persisted DB report exactly (merged
+        // errors+warnings); real failed-row count passed explicitly so
+        // warnings never inflate it — see emitProgress's comment above.
+        const persistedEntries = [...errors, ...warnings.map(w => ({ ...w, warning: true }))];
+        await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, persistedEntries, duplicateCount, outcomeFailed);
         await query(`
             UPDATE csv_upload_logs
             SET status = 'done', success_count = $1, failed_count = $2, duplicate_count = $3, errors = $4, processing_finished_at = NOW()
             WHERE id = $5
-        `, [successCount, outcomeFailed, duplicateCount, JSON.stringify([...errors, ...warnings.map(w => ({ ...w, warning: true }))]), batchId]);
+        `, [successCount, outcomeFailed, duplicateCount, JSON.stringify(persistedEntries), batchId]);
 
         broadcastToAll({ type: 'RAW_DATA_MUTATED', verticalId, action: 'bulk_upload', batchId });
     } catch (error) {

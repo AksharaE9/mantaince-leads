@@ -15,13 +15,25 @@ import { CacheKeys, TTL } from '../lib/cacheKeys.js';
  * `data` column on `cost_conversions`); per-vertical custom fields come
  * from `field_configs` and are appended dynamically so the template never
  * goes stale when an admin adds a new custom field.
+ *
+ * Phone-number-only-mandatory policy: `phone` is the only `required: true`
+ * field below. `businessName` used to be required too; it's now optional
+ * like every other field, matching Raw Data/Delivery Data (see
+ * `rawDataImportSchema.js`'s file-header note and CLAUDE.md). NOTE: the
+ * live bulk-upload pipeline (`server/src/jobs/csvProcessor.js`) has its own
+ * hardcoded validation and does NOT call `validateRowAgainstSchema` below —
+ * that function exists but isn't wired into the actual upload path, so this
+ * schema change alone does not change bulk-upload behavior. The matching
+ * hard-block in `csvProcessor.js` was removed separately; if a future
+ * refactor makes `csvProcessor.js` call `validateRowAgainstSchema` instead,
+ * this file is already correct for that.
  */
 
 const BASE_FIELDS_CALL = [
     { key: 'date', label: 'Date', csvHeader: 'DATE', type: 'string', required: false },
     { key: 'employeeName', label: 'Employee Name', csvHeader: 'EMPLOYEE NAME', type: 'string', required: false },
     { key: 'businessType', label: 'Business Type', csvHeader: 'BUSINESS TYPE', type: 'string', required: false },
-    { key: 'businessName', label: 'Business / Person / Shop / Company Name', csvHeader: 'BUSINESS / PERSON / SHOP / COMPANY NAME', type: 'string', required: true, maxLength: 255 },
+    { key: 'businessName', label: 'Business / Person / Shop / Company Name', csvHeader: 'BUSINESS / PERSON / SHOP / COMPANY NAME', type: 'string', required: false, maxLength: 255 },
     { key: 'phone', label: 'Contact Number', csvHeader: 'CONTACT NUMBER', type: 'phone', required: true, unique: true },
     { key: 'pointOfContact', label: 'Point of Contact', csvHeader: 'POINT OF CONTACT', type: 'string', required: false },
     { key: 'area', label: 'Area', csvHeader: 'AREA', type: 'string', required: false },
@@ -40,7 +52,7 @@ const BASE_FIELDS_POSITIVE = [
     { key: 'date', label: 'Date', csvHeader: 'DATE', type: 'string', required: false },
     { key: 'employeeName', label: 'Employee Name', csvHeader: 'EMPLOYEE NAME', type: 'string', required: false },
     { key: 'businessType', label: 'Business Type', csvHeader: 'BUSINESS TYPE', type: 'string', required: false },
-    { key: 'businessName', label: 'Business / Person / Shop / Company Name', csvHeader: 'BUSINESS / PERSON / SHOP / COMPANY NAME', type: 'string', required: true, maxLength: 255 },
+    { key: 'businessName', label: 'Business / Person / Shop / Company Name', csvHeader: 'BUSINESS / PERSON / SHOP / COMPANY NAME', type: 'string', required: false, maxLength: 255 },
     { key: 'area', label: 'Area', csvHeader: 'AREA', type: 'string', required: false },
     { key: 'city', label: 'City', csvHeader: 'CITY', type: 'string', required: false },
     { key: 'phone', label: 'Contact Number', csvHeader: 'CONTACT NUMBER', type: 'phone', required: true, unique: true },
