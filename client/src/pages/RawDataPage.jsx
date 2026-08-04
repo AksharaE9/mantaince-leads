@@ -4,10 +4,17 @@ import DataSectionPage from '../components/DataSectionPage.jsx';
 import RawDataModal from '../components/RawDataModal.jsx';
 
 // Display-only date formatting: the API returns DATE columns as ISO strings
-// ("2026-07-24T00:00:00.000Z") that already round-trip safely as UTC — just
-// take the date portion, never re-parse through `new Date()` for display
-// (see the timezone-gotcha discipline established in rawDataProcessor.js).
-const fmtDate = (v) => (v ? String(v).slice(0, 10) : '-');
+// ("2026-07-24T00:00:00.000Z") that already round-trip safely as UTC — take
+// the YYYY-MM-DD date portion and reorder it as a plain string operation
+// (never re-parse through `new Date()` for display — see the timezone-gotcha
+// discipline established in rawDataProcessor.js) into DD-MM-YYYY, matching
+// how dates already display everywhere else in this app (e.g. the Edit COS
+// panel) and in the bulk-upload template's sample rows.
+const fmtDate = (v) => {
+  if (!v) return '-';
+  const [y, m, d] = String(v).slice(0, 10).split('-');
+  return y && m && d ? `${d}-${m}-${y}` : '-';
+};
 
 const config = {
   title: 'Raw Data',

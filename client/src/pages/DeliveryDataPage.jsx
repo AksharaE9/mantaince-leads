@@ -3,7 +3,14 @@ import { Truck, Link2 } from 'lucide-react';
 import DataSectionPage from '../components/DataSectionPage.jsx';
 import DeliveryDataModal from '../components/DeliveryDataModal.jsx';
 
-const fmtDate = (v) => (v ? String(v).slice(0, 10) : '-');
+// Display-only date formatting: see RawDataPage.jsx's fmtDate for why this
+// is a plain string reorder (YYYY-MM-DD -> DD-MM-YYYY), never a `new Date()`
+// re-parse — matches how dates already display everywhere else in this app.
+const fmtDate = (v) => {
+  if (!v) return '-';
+  const [y, m, d] = String(v).slice(0, 10).split('-');
+  return y && m && d ? `${d}-${m}-${y}` : '-';
+};
 
 const config = {
   title: 'Delivery Data',

@@ -29,7 +29,11 @@ import { CacheKeys, TTL } from '../lib/cacheKeys.js';
  * this file is already correct for that.
  */
 
-const BASE_FIELDS_CALL = [
+// Exported (not just module-private) so tests can assert directly on the
+// required-field set without needing a DB connection (getLeadImportSchema
+// itself queries field_configs) — see leadImportTemplate.test.js's
+// phone-number-only-mandatory safeguard checks.
+export const BASE_FIELDS_CALL = [
     { key: 'date', label: 'Date', csvHeader: 'DATE', type: 'string', required: false },
     { key: 'employeeName', label: 'Employee Name', csvHeader: 'EMPLOYEE NAME', type: 'string', required: false },
     { key: 'businessType', label: 'Business Type', csvHeader: 'BUSINESS TYPE', type: 'string', required: false },
@@ -48,7 +52,7 @@ const BASE_FIELDS_CALL = [
     { key: 'notes', label: 'Notes to the COS if Any', csvHeader: 'NOTES TO THE COS IF ANY', type: 'string', required: false },
 ];
 
-const BASE_FIELDS_POSITIVE = [
+export const BASE_FIELDS_POSITIVE = [
     { key: 'date', label: 'Date', csvHeader: 'DATE', type: 'string', required: false },
     { key: 'employeeName', label: 'Employee Name', csvHeader: 'EMPLOYEE NAME', type: 'string', required: false },
     { key: 'businessType', label: 'Business Type', csvHeader: 'BUSINESS TYPE', type: 'string', required: false },

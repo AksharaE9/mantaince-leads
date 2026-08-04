@@ -264,11 +264,14 @@ export const downloadRawDataTemplate = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
 
+        // Sample dates use DD-MM-YYYY — matches this app's own forms (e.g. the
+        // Edit COS panel's `dd-mm-yyyy` placeholder) and is explicitly accepted
+        // by parseFlexibleDate (server/src/services/rawDataImportSchema.js).
         const sampleValues = {
-            date: '2026-07-24', employeeName: 'Jane Doe', businessType: 'Retail',
+            date: '24-07-2026', employeeName: 'Jane Doe', businessType: 'Retail',
             businessName: 'Acme Traders', area: 'Whitefield', city: 'Bengaluru',
             phoneNumber: '9876543210', address: '123 Main Street',
-            appointmentDate: '2026-08-01', appointmentTimings: '11:00 AM', remarks: 'Interested',
+            appointmentDate: '01-08-2026', appointmentTimings: '11:00 AM', remarks: 'Interested',
         };
 
         if (req.query.format === 'xlsx') {

@@ -26,14 +26,19 @@ const sanitizeCsvValue = (val) => {
     return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
 };
 
+// Sample dates use DD-MM-YYYY — the format this app's own forms already
+// display dates in (e.g. the Edit COS panel's `dd-mm-yyyy` placeholder), not
+// ISO. The bulk-upload date parser (parseFlexibleDate, in
+// rawDataImportSchema.js) accepts this format natively — verified by
+// tests/unit/server/services/rawDataImportSchema.test.js's DD-MM-YYYY cases.
 const SAMPLE_VALUES = {
-    date: '2026-07-24', employeeName: 'Jane Doe', businessType: 'Retail',
+    date: '24-07-2026', employeeName: 'Jane Doe', businessType: 'Retail',
     businessName: 'Acme Traders', phone: '9876543210', pointOfContact: 'Rahul Sharma',
     area: 'Whitefield', city: 'Bengaluru', deliveredLocation: '123 Main Street',
     remarks: 'Interested, follow up next week', recordings: '',
-    appointmentType: 'Yes', appointmentDate: '2026-08-01', appointmentTime: '11:00 AM',
+    appointmentType: 'Yes', appointmentDate: '01-08-2026', appointmentTime: '11:00 AM',
     requirement: '50 units', notes: 'Prefers WhatsApp contact',
-    followUpRequired: 'Yes', followUps: '1', followUpDates: '2026-08-05',
+    followUpRequired: 'Yes', followUps: '1', followUpDates: '05-08-2026',
     followUpRemarks: 'Awaiting budget approval',
 };
 
