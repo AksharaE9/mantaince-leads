@@ -23,6 +23,7 @@ import adminRouter from './routes/admin.js';
 import followUpsRouter from './routes/followUps.js';
 import rawDataRouter from './routes/rawData.js';
 import deliveryDataRouter from './routes/deliveryData.js';
+import clientErrorsRouter from './routes/clientErrors.js';
 import { startImportWorkerLoop } from './jobs/worker.js';
 import authenticate from './middleware/authenticate.js';
 import attachRole from './middleware/attachRole.js';
@@ -198,6 +199,10 @@ app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/followUps', followUpsRouter);
 app.use('/api/v1/raw-data', rawDataRouter);
 app.use('/api/v1/delivery-data', deliveryDataRouter);
+// No `authenticate` gate on this one — see clientErrors.js controller doc
+// comment for why (it exists to still accept a report when the client's
+// normal authenticated request just failed).
+app.use('/api/v1/client-errors', clientErrorsRouter);
 
 // Global list to store the last 50 server-side errors in memory for diagnostics
 global.debugErrors = global.debugErrors || [];

@@ -72,6 +72,29 @@ against any database that already passes the existing checks — the code
 will look correct and simply never execute. Always add your new
 table/column to that readiness check when you add DDL.
 
+## Duplicate detection is scoped to vertical + sub-vertical + lead_type (2026-08-05)
+
+COS/Positives duplicate checks (single add, bulk upload, edit, and the
+`/api/v1/leads/bulk` JSON endpoint) are scoped to the exact
+`(vertical_id, sub_vertical_id, lead_type, phone)` combination — **not**
+just `vertical_id`. It used to be vertical-only, which incorrectly blocked
+uploading the same phone into a second, different sub-vertical under the
+same parent vertical (confirmed root cause of a reported "upload silently
+blocked" bug — the same data uploaded fine to one sub-vertical, then looked
+silently rejected in another). Sub-verticals are independent sections for
+duplicate purposes, consistent with this app's existing strict
+section-level isolation elsewhere (COS/Raw Data/Delivery Data are
+independent; COS/Positives are independent via `lead_type` despite sharing
+one table — see the dedicated `duplicateSectionIsolation.integration.test.js`
+and `subverticalDuplicateScoping.integration.test.js`). A genuine duplicate
+rejection now also names the specific conflicting record (business name)
+in its error message, not just "a duplicate exists somewhere". The manual,
+opt-in "Find & Remove Duplicates" admin tool (`scanCosDuplicates`) was
+deliberately left vertical-wide, not changed to sub-vertical-scoped — it
+exists specifically to catch cross-sub-vertical accidental duplicates an
+admin wants consolidated, a different purpose from the auto-block on
+create/upload.
+
 ## Bulk import architecture (Leads, Positives, Raw Data)
 
 Three features share one pipeline, built up over several sessions:
@@ -205,3 +228,48 @@ re-authenticate.
 - Employee Name always resolves to a real user id (never stored as free
   text); ambiguous or unresolvable names are rejected with suggested
   closest matches (Levenshtein-ranked), never silently guessed.
+
+## The two production domains are correct, deployed, and NOT a CORS bug (2026-08-05)
+
+A user reported a browser console CORS error (`Access-Control-Allow-Origin`
+missing + `net::ERR_FAILED`) blocking a CSV upload from
+`mantaince-leads.vercel.app` calling `mantaince-leads-sqvw.vercel.app`. This
+looks exactly like a stale-alias/wrong-domain bug and was investigated as
+one. **It is not one — do not "fix" it by touching `server/src/app.js`'s
+CORS allow-list or the client's `VITE_API_URL` without new evidence.**
+Verified live, same day:
+- `mantaince-leads.vercel.app` (frontend) and `mantaince-leads-sqvw.vercel.app`
+  (backend) are two separate, legitimate Vercel projects — the app's real,
+  working architecture, confirmed via the client's own built bundle
+  (`baseURL: "https://mantaince-leads-sqvw.vercel.app"`).
+- A live preflight AND a live actual request (including a deliberately
+  unauthenticated 401 response) both returned the correct
+  `Access-Control-Allow-Origin: https://mantaince-leads.vercel.app` header.
+  CORS works on error responses too, not just success.
+- The allow-list entry for `mantaince-leads.vercel.app` in `app.js`'s `cors()`
+  origin callback has been there, unchanged, since commit `49da26f` (11 Jun
+  2026) — not a recent regression.
+- `/health`'s `commitSha` on the live backend matched local `HEAD` exactly
+  at investigation time — production was not running stale code.
+
+The console dump also contained a literal `net::ERR_INTERNET_DISCONNECTED`
+line — real evidence of a client-machine connectivity drop during that
+session. Chrome is known to report network-layer failures on cross-origin
+requests using the same "blocked by CORS policy" wording as a genuine CORS
+rejection, since JS can't distinguish the two cases (opaque failure either
+way). The most likely explanation is a one-off local network blip, not a
+code bug.
+
+**What was a real, fixed bug**: regardless of what caused any specific
+instance, the app had no handling at all for "request never reached the
+server" (no `err.response`) — every existing `err.response?.data?.error ||
+fallback` call site silently fell through to a generic string, and
+`CsvImportModal.jsx`'s result-view state machine never even reached that
+fallback (it rendered nothing at all — see `git log` around 2026-08-05 for
+the fix). See `client/src/utils/networkError.js` and the axios response
+interceptor in `client/src/api/axios.js` for the fix: every no-response
+failure now gets a correlationId, a specific user-facing message, client-side
+logging, and a best-effort persisted report via `POST /api/v1/client-errors`
+→ `client_error_logs` — the one place this failure class is ever recorded,
+since the server-side request/error logging everywhere else in this app
+cannot capture a request that never arrived.

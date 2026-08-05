@@ -152,6 +152,9 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'raw_data' AND column_name = 'business_name' AND is_nullable = 'YES'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'client_error_logs'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -360,6 +363,27 @@ const runMigrations = async () => {
             user_agent TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Client-reported "request never reached the server" failures
+        -- (network drop, DNS failure, timeout, CORS block). The server-side
+        -- request/error logging everywhere else in this app cannot capture
+        -- this failure class by definition — the request never arrived —
+        -- so the client posts a best-effort, fire-and-forget report here
+        -- instead (see client/src/utils/networkError.js). No FK requiring
+        -- a valid session: the whole point is this fires when the normal
+        -- authenticated request path just failed, so user_id is optional
+        -- best-effort context, not a guarantee.
+        CREATE TABLE IF NOT EXISTS client_error_logs (
+            id UUID PRIMARY KEY,
+            correlation_id VARCHAR(100),
+            user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            url TEXT,
+            method VARCHAR(10),
+            message TEXT,
+            code VARCHAR(50),
+            user_agent TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS escalations (
@@ -700,6 +724,15 @@ const runMigrations = async () => {
         -- B-Tree indexes for exact matches & filtering
         CREATE INDEX IF NOT EXISTS idx_cost_conversions_vertical_phone_btree ON cost_conversions (vertical_id, phone);
         CREATE INDEX IF NOT EXISTS idx_cost_conversions_csv_batch_id ON cost_conversions (csv_batch_id);
+        -- Supports the sub-vertical-scoped duplicate check (single add, bulk
+        -- upload, edit) — see costConversions.js/csvProcessor.js. Duplicate
+        -- detection used to be scoped to (vertical_id, phone) only, which
+        -- incorrectly blocked the same phone number across independent
+        -- sub-verticals under one parent vertical; now scoped to
+        -- (vertical_id, sub_vertical_id, phone, lead_type).
+        CREATE INDEX IF NOT EXISTS idx_cost_conversions_vertical_subvertical_phone ON cost_conversions (vertical_id, sub_vertical_id, phone);
+
+        CREATE INDEX IF NOT EXISTS idx_client_error_logs_created_at ON client_error_logs (created_at DESC);
 
         -- COVERING INDEX: satisfied entirely from the index — no heap fetch.
         DROP INDEX IF EXISTS idx_leads_list_covering;

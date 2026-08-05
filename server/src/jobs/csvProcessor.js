@@ -232,18 +232,28 @@ const processCsvJob = async (job) => {
         // ── 6. Batch-lookup existing phones (single query) ────────────────────
         const uniqueCsvPhones = [...new Set(csvPhones)];
         let existingPhones = [];
+        const conflictLabelByPhone = new Map();
         if (uniqueCsvPhones.length > 0) {
-            // Scoped by lead_type: COS and Positives share this table but are
-            // independent sections for duplicate purposes (see costConversions.js's
-            // createCostConversion for the single-add equivalent of this same fix).
+            // Scoped by lead_type (COS and Positives share this table but are
+            // independent sections for duplicate purposes) AND sub_vertical_id
+            // — sub-verticals are independent sections everywhere else in this
+            // app; scoping only to vertical_id previously blocked uploading
+            // the same phone into a second, different sub-vertical under the
+            // same parent vertical, which was the confirmed root cause of the
+            // reported bug (see costConversions.js's createCostConversion for
+            // the single-add equivalent of this same fix, and
+            // updateCostConversion for the edit equivalent).
             const existingRes = await query(
-                `SELECT phone FROM cost_conversions
-                 WHERE vertical_id = $1 AND is_deleted = false
+                `SELECT phone, name, business_name FROM cost_conversions
+                 WHERE vertical_id = $1 AND sub_vertical_id = $4 AND is_deleted = false
                    AND lead_type = $3
                    AND phone = ANY($2)`,
-                [verticalId, uniqueCsvPhones, leadType]
+                [verticalId, uniqueCsvPhones, leadType, subVerticalId]
             );
             existingPhones = existingRes.rows.map(l => sanitizePhone(l.phone));
+            for (const row of existingRes.rows) {
+                conflictLabelByPhone.set(sanitizePhone(row.phone), row.business_name || row.name || null);
+            }
         }
         // phoneSet tracks both DB duplicates AND within-CSV duplicates
         const phoneSet = new Set(existingPhones);
@@ -281,7 +291,16 @@ const processCsvJob = async (job) => {
 
             if (phoneSet.has(rawPhone)) {
                 duplicateCount++;
-                const reason = 'Duplicate: contact number already exists';
+                // Name the specific existing record when it's a genuine DB
+                // duplicate (conflictLabelByPhone); a within-CSV duplicate
+                // (two rows in this same file sharing a phone) has no DB
+                // record to name, so it falls back to the generic reason —
+                // still a clear, specific message either way, never a
+                // silent skip.
+                const conflictLabel = conflictLabelByPhone.get(rawPhone);
+                const reason = conflictLabel
+                    ? `Duplicate: contact number already exists in this sub-vertical (conflicts with "${conflictLabel}")`
+                    : 'Duplicate: contact number already exists (also appears earlier in this file)';
                 errors.push({ row: rowNum, code: ErrorCodes.DUPLICATE_PHONE, field: 'phone', reason, originalRow: rawRow });
                 rowOutcomes.push({ row: rowNum, status: 'duplicate', reason });
                 continue;

@@ -332,15 +332,22 @@ export const createCostConversion = async (req, res) => {
         }
         data.employeeName = targetEmployeeName || data.employeeName || '';
 
-        // Duplicate check is scoped to lead_type: COS (CALL/FIELD) and
-        // Positives (POSITIVE) share this table but are treated as
-        // independent sections for duplicate purposes — the same phone
-        // number legitimately exists once as a COS lead and once as a
-        // Positive without either blocking the other.
+        // Duplicate check is scoped to lead_type (COS vs Positives share this
+        // table but are independent sections for duplicate purposes) AND
+        // sub_vertical_id — sub-verticals are independent sections in every
+        // other part of this app (own custom fields, own name, own scoped
+        // views), and the same phone number legitimately shows up once per
+        // sub-vertical (e.g. the same shop contacted for two different
+        // affiliate programs under one parent vertical). Scoping only to
+        // vertical_id previously blocked that legitimately, and was the
+        // confirmed root cause of the reported "upload silently blocked in
+        // a different sub-vertical" bug — see costConversions.js/
+        // csvProcessor.js's other two duplicate-check call sites for the
+        // same fix applied identically (bulk upload, edit).
         leadRes = await query(`
             WITH dedup AS (
                 SELECT id FROM cost_conversions
-                WHERE phone = $1 AND vertical_id = $2 AND is_deleted = false AND lead_type = $10
+                WHERE phone = $1 AND vertical_id = $2 AND sub_vertical_id = $19 AND is_deleted = false AND lead_type = $10
                 LIMIT 1
             )
             INSERT INTO cost_conversions
@@ -363,14 +370,30 @@ export const createCostConversion = async (req, res) => {
             geotagAddress || null,
             gCap,
             (stageId       && isValidUUID(stageId))       ? stageId       : null,
-            status || 'new'
+            status || 'new',
+            subVerticalId
         ]);
 
         if (leadRes.rows.length === 0) {
+            // Identify exactly which existing record it conflicts with,
+            // rather than just saying "a duplicate exists somewhere" — a
+            // genuine duplicate rejection should never look like an
+            // unexplained silent skip to the person who hit it.
+            const conflictRes = await query(
+                `SELECT id, name, business_name FROM cost_conversions
+                 WHERE phone = $1 AND vertical_id = $2 AND sub_vertical_id = $3 AND is_deleted = false AND lead_type = $4
+                 LIMIT 1`,
+                [sanitizedPhone, verticalId, subVerticalId, leadType || 'CALL']
+            );
+            const conflict = conflictRes.rows[0];
+            const conflictLabel = conflict ? (conflict.business_name || conflict.name || conflict.id) : null;
             return operationError(res, {
                 status: 409, code: ErrorCodes.DUPLICATE_PHONE,
-                message: `Phone number ${sanitizedPhone} already exists in ${section === 'positives' ? 'Positives' : 'COS'} for this vertical`,
+                message: conflict
+                    ? `Phone number ${sanitizedPhone} already exists in ${section === 'positives' ? 'Positives' : 'COS'} for this sub-vertical (conflicts with "${conflictLabel}")`
+                    : `Phone number ${sanitizedPhone} already exists in ${section === 'positives' ? 'Positives' : 'COS'} for this sub-vertical`,
                 section, operation: 'single_add', field: 'phone',
+                recordId: conflict?.id,
             });
         }
 
@@ -501,7 +524,7 @@ export const updateCostConversion = async (req, res) => {
         return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
     }
     try {
-        const leadRes = await query('SELECT id, vertical_id, is_deleted, assigned_to, uploaded_by, lead_type FROM cost_conversions WHERE id = $1', [id]);
+        const leadRes = await query('SELECT id, vertical_id, sub_vertical_id, is_deleted, assigned_to, uploaded_by, lead_type FROM cost_conversions WHERE id = $1', [id]);
         const lead    = leadRes.rows[0];
         if (!lead || lead.is_deleted) {
             return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
@@ -525,16 +548,24 @@ export const updateCostConversion = async (req, res) => {
             if (!sanitizedPhone) {
                 return res.status(400).json({ success: false, error: 'Contact number is mandatory' });
             }
-            // Check for duplicates — scoped to this lead's own lead_type so COS
-            // and Positives (which share this table) never cross-flag each other.
+            // Check for duplicates — scoped to this lead's own lead_type (so
+            // COS and Positives, which share this table, never cross-flag
+            // each other) AND sub_vertical_id (an edit that also moves the
+            // lead to a different sub-vertical must check against *that*
+            // sub-vertical, not the one it's leaving — matches the same
+            // sub-vertical scoping fix applied to single-add and bulk
+            // upload's duplicate checks).
+            const effectiveSubVerticalId = updates.subVerticalId !== undefined ? updates.subVerticalId : lead.sub_vertical_id;
             const existing = await query(
-                `SELECT id FROM cost_conversions
-                WHERE phone = $1 AND vertical_id = $2 AND id <> $3 AND is_deleted = false AND lead_type = $4
+                `SELECT id, name, business_name FROM cost_conversions
+                WHERE phone = $1 AND vertical_id = $2 AND sub_vertical_id = $5 AND id <> $3 AND is_deleted = false AND lead_type = $4
                 LIMIT 1`,
-                [sanitizedPhone, lead.vertical_id, id, lead.lead_type]
+                [sanitizedPhone, lead.vertical_id, id, lead.lead_type, effectiveSubVerticalId]
             );
             if (existing.rowCount > 0) {
-                return res.status(409).json({ success: false, error: 'Another lead with this phone number already exists' });
+                const conflict = existing.rows[0];
+                const conflictLabel = conflict.business_name || conflict.name || conflict.id;
+                return res.status(409).json({ success: false, error: `Another lead with this phone number already exists in this sub-vertical (conflicts with "${conflictLabel}")` });
             }
             updates.phone = sanitizedPhone;
         }
@@ -1030,26 +1061,44 @@ export const createCostConversionBulk = async (req, res) => {
             });
         }
 
+        // Scoped per (phone, sub_vertical_id) — sub-verticals are independent
+        // sections for duplicate purposes everywhere else in this app; this
+        // JSON bulk-add endpoint takes a per-lead subVerticalId (unlike the
+        // CSV bulk upload's single batch-level value), so the dedup key must
+        // be per-row too. Same fix as single-add/CSV-bulk-upload/edit — see
+        // createCostConversion for the fuller rationale.
+        const dupKey = (phone, subVerticalId) => `${phone}::${subVerticalId || ''}`;
         const inputPhones = valid.map(l => l.phone).filter(Boolean);
-        let existingPhones = [];
+        let existingRows = [];
         if (inputPhones.length > 0) {
             const existingRes = await query(
-                'SELECT phone FROM cost_conversions WHERE vertical_id = $1 AND is_deleted = false AND phone = ANY($2)',
+                'SELECT phone, sub_vertical_id, name, business_name FROM cost_conversions WHERE vertical_id = $1 AND is_deleted = false AND phone = ANY($2)',
                 [verticalId, inputPhones]
             );
-            existingPhones = existingRes.rows.map(r => r.phone);
+            existingRows = existingRes.rows;
         }
-        const phoneSet = new Set(existingPhones);
+        const conflictLabelByKey = new Map();
+        for (const row of existingRows) {
+            conflictLabelByKey.set(dupKey(row.phone, row.sub_vertical_id), row.business_name || row.name || null);
+        }
+        const phoneSet = new Set(existingRows.map(r => dupKey(r.phone, r.sub_vertical_id)));
 
         const finalInsertLeads = [];
 
         for (const lead of valid) {
-            if (lead.phone && phoneSet.has(lead.phone)) {
-                invalid.push({ name: lead.name, phone: lead.phone, reason: 'Duplicate phone number' });
+            const key = dupKey(lead.phone, lead.subVerticalId);
+            if (lead.phone && phoneSet.has(key)) {
+                const conflictLabel = conflictLabelByKey.get(key);
+                invalid.push({
+                    name: lead.name, phone: lead.phone,
+                    reason: conflictLabel
+                        ? `Duplicate phone number in this sub-vertical (conflicts with "${conflictLabel}")`
+                        : 'Duplicate phone number in this sub-vertical',
+                });
             } else {
                 finalInsertLeads.push(lead);
                 if (lead.phone) {
-                    phoneSet.add(lead.phone);
+                    phoneSet.add(key);
                 }
             }
         }

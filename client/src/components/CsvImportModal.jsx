@@ -218,8 +218,25 @@ export default function CsvImportModal({
         }
       }, 2000);
     } catch (err) {
+      // Must set uploadResult here too, not just uploadStatus — the result
+      // panel below only renders when both are set. Without this, a
+      // network/CORS-layer failure (no err.response at all) left the modal
+      // rendering nothing: not the form (status isn't 'idle'), not the
+      // progress view (status isn't 'uploading'/'processing'), not the
+      // result panel (uploadResult was never populated). A blank modal is
+      // arguably worse than no modal — this is the actual "silent failure"
+      // bug behind the reported CORS incident, independent of what caused
+      // that specific request to fail.
+      const message = extractErrorMessage(err, 'Failed to upload file');
       setUploadStatus('failed');
-      toast.error(extractErrorMessage(err, 'Failed to upload file'));
+      setUploadResult({
+        batchId: null,
+        successCount: 0,
+        failedCount: 0,
+        duplicateCount: 0,
+        errors: [{ row: 0, reason: message }],
+      });
+      toast.error(message);
     }
   };
 
@@ -424,14 +441,16 @@ export default function CsvImportModal({
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">Error Log Summary:</span>
-                  <button
-                    type="button"
-                    onClick={downloadFailedRecords}
-                    className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
-                  >
-                    <Download size={11} />
-                    <span>Download Failed Records</span>
-                  </button>
+                  {uploadResult.batchId && (
+                    <button
+                      type="button"
+                      onClick={downloadFailedRecords}
+                      className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
+                    >
+                      <Download size={11} />
+                      <span>Download Failed Records</span>
+                    </button>
+                  )}
                 </div>
                 <div className="border border-red-100 rounded-lg p-3 bg-red-50/20 max-h-[140px] overflow-y-auto text-xs font-mono text-red-600 space-y-1">
                   {uploadResult.errors.slice(0, 50).map((err, idx) => (

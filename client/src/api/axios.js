@@ -1,4 +1,7 @@
 import axios from 'axios';
+import { isNoResponseError, enrichNoResponseError } from '../utils/networkError.js';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 let storeRef = {
   getAccessToken: () => null,
@@ -67,6 +70,25 @@ instance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+
+    // Request never reached the server at all — network drop, DNS failure,
+    // timeout, or a CORS block (the browser withholds everything about a
+    // blocked cross-origin response, including whether it was ever sent).
+    // axios surfaces this as `error.request` set with no `error.response`,
+    // so there is no body for any of this app's ~70 existing
+    // `err.response?.data?.error || fallback` / `extractErrorMessage(err, ...)`
+    // call sites to read — without this, every one of them silently falls
+    // through to a generic hardcoded string with no correlationId, and
+    // consumers with their own result-state machine (e.g. CsvImportModal)
+    // never transition out of "in progress" at all. This synthesizes a
+    // response-shaped payload in the exact convention those call sites
+    // already expect, so a specific, correlation-traceable message reaches
+    // every one of them with zero per-call-site changes. See
+    // client/src/utils/networkError.js for the correlationId + client-side
+    // logging + best-effort persisted-report logic.
+    if (!error.response && isNoResponseError(error)) {
+      enrichNoResponseError(error, API_BASE_URL);
+    }
 
     // Prevent infinite loop if auth check itself fails
     if (originalRequest.url?.includes('/auth/refresh') || originalRequest.url?.includes('/auth/login')) {
