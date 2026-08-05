@@ -273,3 +273,39 @@ logging, and a best-effort persisted report via `POST /api/v1/client-errors`
 → `client_error_logs` — the one place this failure class is ever recorded,
 since the server-side request/error logging everywhere else in this app
 cannot capture a request that never arrived.
+
+**Re-verified a second time same day**, after a report the identical CORS
+error recurred on a *different* endpoint (Positives import) plus a new
+`auth/refresh` 401 — this looked like the first fix "shipped to the wrong
+call site only." It wasn't: the client has exactly one `axios.create`/
+`baseURL` in the whole codebase (`client/src/api/axios.js`), and
+`authStore.js`'s `refreshToken()` correctly imports that shared instance —
+no wrong-domain reference anywhere to have missed. The recurrence is fully
+explained by the *previous* fix (the paragraph above) having sat committed
+but unpushed between sessions — confirmed directly, not inferred, since the
+working tree still had it uncommitted when this was re-checked. Pushed as
+commit `14f5b3c`.
+
+**Re-verified a third time same day**, this time with a raw `OPTIONS`
+preflight test using the *exact* header set the real browser sends
+(`Authorization, Content-Type, X-Request-ID` — the axios request
+interceptor adds `X-Request-ID` to every call) against every mutating
+endpoint reachable cross-origin, plus explicit trailing-slash and
+attacker-subdomain rejection checks. All correct. `auth/refresh` was
+separately confirmed **not** a bug: a fresh login → fresh refresh against
+production succeeds with a 200 and the real token pair — the earlier 401
+was an artifact of testing with no token/cookie at all (expected behavior
+for an unauthenticated refresh attempt), not a stale-session bug.
+`tests/integration/api/corsPreflight.integration.test.js` now codifies
+this mechanism directly (real OPTIONS+POST via supertest, not an indirect
+config check) — confirmed to fail 5/7 when the origin allow-list entry is
+removed and pass again when restored, so it has real teeth against a
+future regression in `app.js`'s `cors()` wiring specifically.
+
+**If this recurs a fourth time**: stop re-verifying the same CORS
+mechanism (three independent live checks across two sessions have now
+confirmed it correct) and instead capture a fresh browser HAR file /
+Network tab export from the actual failing request — the remaining
+unexplained variable is genuinely transient client-side network
+conditions, which no amount of server-side re-testing can reproduce or
+rule out further.
