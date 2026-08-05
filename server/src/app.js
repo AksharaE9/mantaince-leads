@@ -3,7 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import compression from 'compression';
-import { PORT, CLIENT_URL } from './config/env.js';
+import { PORT, CLIENT_URL, MAX_CSV_FILE_SIZE_MB } from './config/env.js';
 import pool, { connectDB } from './config/db.js';
 import performanceMonitor from './middleware/performance.js';
 import { timingMiddleware } from './middleware/timing.js';
@@ -278,7 +278,7 @@ app.get('/', (req, res) => {
 app.use((err, req, res, next) => {
   // Multer File Size Limit check
   if (err.code === 'LIMIT_FILE_SIZE') {
-    return sendControllerError(res, err, 'globalErrorHandler', { status: 413, code: 'FILE_TOO_LARGE', message: 'File upload size exceeds the maximum limit (10MB).' });
+    return sendControllerError(res, err, 'globalErrorHandler', { status: 413, code: 'FILE_TOO_LARGE', message: `File upload size exceeds the maximum limit (${MAX_CSV_FILE_SIZE_MB}MB).` });
   }
 
   // Malformed multipart body (e.g. missing/invalid boundary) — surfaces as a

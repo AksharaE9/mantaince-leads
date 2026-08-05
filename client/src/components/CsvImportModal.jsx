@@ -281,6 +281,13 @@ export default function CsvImportModal({
                     setSelectedFile(null);
                     return;
                   }
+                  const MAX_SIZE_MB = 4.5;
+                  const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
+                  if (file.size > MAX_SIZE_BYTES) {
+                    toast.error(`File size (${(file.size / 1024 / 1024).toFixed(2)} MB) exceeds Vercel limit of ${MAX_SIZE_MB} MB. Please check for empty/ghost rows, trim the sheet, and try again.`);
+                    setSelectedFile(null);
+                    return;
+                  }
                   setSelectedFile(file);
                 }}
               />

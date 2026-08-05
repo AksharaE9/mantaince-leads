@@ -114,6 +114,21 @@ describe('Bulk lead-import API (CSV/Excel) — regression coverage', () => {
       expect(res.body.data.batchId).toBeTruthy();
     });
 
+    it('rejects a CSV upload that exceeds the maximum size limit (413)', async () => {
+      const sizeBytes = Math.ceil(4.6 * 1024 * 1024);
+      const largeBuffer = Buffer.alloc(sizeBytes, 'a');
+      const res = await request(app)
+        .post('/api/v1/leads/csv/upload')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .field('verticalId', verticalId)
+        .field('subVerticalId', subVerticalId)
+        .field('leadType', 'CALL')
+        .attach('file', largeBuffer, { filename: 'leads_large.csv', contentType: 'text/csv' })
+        .expect(413);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('4.5MB');
+    });
+
     it('accepts a well-formed .xlsx upload and queues it (202)', async () => {
       // Build the .xlsx via the app's own template builder (server/src/services)
       // rather than importing exceljs directly here — exceljs lives in

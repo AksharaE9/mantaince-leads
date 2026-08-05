@@ -20,7 +20,7 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().email('SMTP_FROM must be a valid email').default('noreply@leadsbase.io'),
-  MAX_CSV_FILE_SIZE_MB: z.string().transform(Number).default('10'),
+  MAX_CSV_FILE_SIZE_MB: z.string().transform(Number).default('4.5'),
   PGHOST: z.string().min(1, 'PGHOST is required'),
   PGPORT: z.string().transform(Number).default('5432'),
   PGUSER: z.string().default('postgres'),

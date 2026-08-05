@@ -13,6 +13,7 @@ import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
 import checkPermission from '../middleware/checkPermission.js';
 import { rateLimiter } from '../middleware/rateLimit.js';
+import { MAX_CSV_FILE_SIZE_MB } from '../config/env.js';
 
 const router = express.Router();
 
@@ -23,7 +24,7 @@ const IMPORT_FILE_EXTENSIONS = new Set(['.csv', '.xlsx', '.xls']);
 const OBVIOUSLY_WRONG_MIME_PREFIXES = ['image/', 'video/', 'audio/', 'application/pdf', 'application/zip', 'application/x-msdownload'];
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_CSV_FILE_SIZE_MB * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ext = (file.originalname.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
     const looksWrong = OBVIOUSLY_WRONG_MIME_PREFIXES.some(p => file.mimetype.startsWith(p));
