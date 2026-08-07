@@ -31,8 +31,8 @@ const RESULTS_DIR = path.join(__dirname, '..', 'scratch', 'v4-audit');
 fs.mkdirSync(RESULTS_DIR, { recursive: true });
 
 const BASE_URL = process.env.V4_BASE_URL || 'http://localhost:5000';
-const EMAIL = process.env.V4_EMAIL || 'admin@gmail.com';
-const PASSWORD = process.env.V4_PASSWORD || 'admin123';
+const EMAIL = process.env.V4_EMAIL || 'adminofleads@gmail.com';
+const PASSWORD = process.env.V4_PASSWORD || 'hile@dsbase@123';
 
 const SECTIONS = ['leads', 'positives', 'rawData', 'deliveryData'];
 const SECTION_LABEL = { leads: 'COS', positives: 'Positives & Follow-ups', rawData: 'Raw Data', deliveryData: 'Delivery Data' };

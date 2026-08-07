@@ -4,9 +4,9 @@ async function run() {
   try {
     await connectDB();
 
-    // Keep only admin@gmail.com - delete all dummy/test users
+    // Keep only adminofleads@gmail.com - delete all dummy/test users
     const del = await query(
-      `DELETE FROM users WHERE email != 'admin@gmail.com' RETURNING email, name`
+      `DELETE FROM users WHERE email != 'adminofleads@gmail.com' RETURNING email, name`
     );
     console.log(`🗑️  Deleted ${del.rowCount} dummy/test user(s):`);
     del.rows.forEach(u => console.log(`   - ${u.email} | ${u.name}`));

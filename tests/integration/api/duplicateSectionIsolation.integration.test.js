@@ -24,7 +24,7 @@ describe('Duplicate detection: strict per-section isolation', () => {
     beforeAll(async () => {
         const loginRes = await request(app)
             .post('/api/v1/auth/login')
-            .send({ email: 'admin@gmail.com', password: 'admin123' });
+            .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
         adminToken = loginRes.body.data?.accessToken;
 
         const vertRes = await request(app)
@@ -39,7 +39,7 @@ describe('Duplicate detection: strict per-section isolation', () => {
             .send({ name: 'Standard' });
         subVerticalId = svRes.body.data?.id;
 
-        const meRes = await query("SELECT id FROM users WHERE email = 'admin@gmail.com'");
+        const meRes = await query("SELECT id FROM users WHERE email = 'adminofleads@gmail.com'");
         agentId = meRes.rows[0]?.id;
         await query('UPDATE users SET vertical_access = array_append(vertical_access, $1) WHERE id = $2', [verticalId, agentId]);
 

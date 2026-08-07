@@ -29,19 +29,19 @@ const cleanup = async () => {
         return;
     }
 
-    // Delete users except the admin@gmail.com
-    const adminEmail = 'admin@gmail.com';
+    // Delete users except the adminofleads@gmail.com
+    const adminEmail = 'adminofleads@gmail.com';
     await query('DELETE FROM users WHERE email != $1', [adminEmail]);
 
     // Ensure the admin user exists and has the right password
-    const passwordHash = await bcrypt.hash('admin123', 12);
+    const passwordHash = await bcrypt.hash('hile@dsbase@123', 12);
     await query(`
         INSERT INTO users (id, name, email, password_hash, role_id, is_active, is_approved)
         VALUES ($1, $2, $3, $4, $5, true, true)
         ON CONFLICT (email) DO UPDATE SET password_hash = $4, role_id = $5, is_approved = true, updated_at = NOW()
     `, [crypto.randomUUID(), 'Super Administrator', adminEmail, passwordHash, adminRoleId]);
 
-    console.log('✅ Cleanup complete. Only Super Admin (admin@gmail.com) remains.');
+    console.log('✅ Cleanup complete. Only Super Admin (adminofleads@gmail.com) remains.');
     process.exit(0);
   } catch (err) {
     console.error('❌ Cleanup failed:', err.message);

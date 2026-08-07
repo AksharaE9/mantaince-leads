@@ -12,7 +12,7 @@ describe('Database Triggers Integration', () => {
     try {
       const loginRes = await request(app)
         .post('/api/v1/auth/login')
-        .send({ email: 'admin@gmail.com', password: 'admin123' });
+        .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
       adminToken = loginRes.body.data.accessToken;
 
       const vName = `Trig-V-${Math.floor(Math.random() * 100000)}`;

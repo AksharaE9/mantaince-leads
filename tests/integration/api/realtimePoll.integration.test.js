@@ -17,7 +17,7 @@ describe('Realtime poll endpoint', () => {
   beforeAll(async () => {
     const loginRes = await request(app)
       .post('/api/v1/auth/login')
-      .send({ email: 'admin@gmail.com', password: 'admin123' });
+      .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
     adminToken = loginRes.body.data?.accessToken;
 
     const vertRes = await request(app)

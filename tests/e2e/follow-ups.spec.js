@@ -3,8 +3,8 @@ import { test, expect } from '@playwright/test';
 test.describe('Follow-Ups E2E Flow', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/login');
-    await page.fill('input[type="email"]', 'admin@gmail.com');
-    await page.fill('input[type="password"]', 'admin123');
+    await page.fill('input[type="email"]', 'adminofleads@gmail.com');
+    await page.fill('input[type="password"]', 'hile@dsbase@123');
     await page.click('button[type="submit"]');
     await page.waitForURL('**/leads**');
   });

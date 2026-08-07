@@ -66,10 +66,10 @@ async function seed() {
     console.log('🌱 Seeding verticals & sub-verticals...\n');
 
     // Get admin user id
-    const adminRes = await query(`SELECT id FROM users WHERE email = 'admin@gmail.com' LIMIT 1`);
+    const adminRes = await query(`SELECT id FROM users WHERE email = 'adminofleads@gmail.com' LIMIT 1`);
     const adminId = adminRes.rows[0]?.id || null;
     if (!adminId) {
-      console.error('❌ admin@gmail.com not found. Aborting.');
+      console.error('❌ adminofleads@gmail.com not found. Aborting.');
       process.exit(1);
     }
 

@@ -12,7 +12,7 @@ describe('CostConversions API Integration', () => {
     try {
       const loginRes = await request(app)
         .post('/api/v1/auth/login')
-        .send({ email: 'admin@gmail.com', password: 'admin123' });
+        .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
       adminToken = loginRes.body.data.accessToken;
     } catch (err) {
       console.error('Failed to login during test setup', err.message);
@@ -72,7 +72,7 @@ describe('CostConversions API Integration', () => {
       });
 
       it('returns 403 for unauthorized vertical access', async () => {
-        const adminRes = await query('SELECT password_hash FROM users WHERE email = $1', ['admin@gmail.com']);
+        const adminRes = await query('SELECT password_hash FROM users WHERE email = $1', ['adminofleads@gmail.com']);
         const adminHash = adminRes.rows[0].password_hash;
         const agentRoleId = (await query("SELECT id FROM roles WHERE name = 'agent'")).rows[0].id;
         const agentUserId = crypto.randomUUID();
@@ -85,11 +85,12 @@ describe('CostConversions API Integration', () => {
 
         const agentLogin = await request(app)
           .post('/api/v1/auth/login')
-          .send({ email: agentEmail, password: 'admin123' });
+          .send({ email: agentEmail, password: 'hile@dsbase@123' });
         const agentToken = agentLogin.body.data.accessToken;
+        const nonExistentVerticalId = crypto.randomUUID();
 
         await request(app)
-          .get('/api/v1/followUps/verticals/0f26e60c-09fe-43e3-83c6-b8ece895d365/follow-ups/export/csv')
+          .get(`/api/v1/followUps/verticals/${nonExistentVerticalId}/follow-ups/export/csv`)
           .set('Authorization', `Bearer ${agentToken}`)
           .expect(403);
       });

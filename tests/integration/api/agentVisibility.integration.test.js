@@ -20,7 +20,7 @@ describe('Agent Data Visibility Integration Tests', () => {
     // 1. Login as admin
     const loginRes = await request(app)
       .post('/api/v1/auth/login')
-      .send({ email: 'admin@gmail.com', password: 'admin123' });
+      .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
     adminToken = loginRes.body.data.accessToken;
 
     // Get a valid vertical ID from DB
@@ -48,7 +48,7 @@ describe('Agent Data Visibility Integration Tests', () => {
     }
 
     // Get admin password hash to reuse
-    const adminRes = await query('SELECT password_hash FROM users WHERE email = $1', ['admin@gmail.com']);
+    const adminRes = await query('SELECT password_hash FROM users WHERE email = $1', ['adminofleads@gmail.com']);
     const adminHash = adminRes.rows[0].password_hash;
 
     // 2. Create Agent 1
@@ -68,7 +68,7 @@ describe('Agent Data Visibility Integration Tests', () => {
 
     const agentLogin = await request(app)
       .post('/api/v1/auth/login')
-      .send({ email: agentEmail, password: 'admin123' });
+      .send({ email: agentEmail, password: 'hile@dsbase@123' });
     agentToken = agentLogin.body.data.accessToken;
 
     // 3. Create Agent 2
@@ -81,7 +81,7 @@ describe('Agent Data Visibility Integration Tests', () => {
 
     const otherAgentLogin = await request(app)
       .post('/api/v1/auth/login')
-      .send({ email: otherAgentEmail, password: 'admin123' });
+      .send({ email: otherAgentEmail, password: 'hile@dsbase@123' });
     otherAgentToken = otherAgentLogin.body.data.accessToken;
 
     // 4. Create leads

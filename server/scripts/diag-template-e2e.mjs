@@ -61,9 +61,9 @@ async function main() {
     const testName = `__template_e2e_${Date.now()}`;
     const verticalId = crypto.randomUUID();
     const subVerticalId = crypto.randomUUID();
-    const adminRes = await query(`SELECT id FROM users WHERE email = 'admin@gmail.com' LIMIT 1`);
+    const adminRes = await query(`SELECT id FROM users WHERE email = 'adminofleads@gmail.com' LIMIT 1`);
     const adminId = adminRes.rows[0]?.id;
-    if (!adminId) throw new Error('admin@gmail.com not found');
+    if (!adminId) throw new Error('adminofleads@gmail.com not found');
 
     await query(`INSERT INTO verticals (id, name, slug, created_by) VALUES ($1, $2, $3, $4)`,
         [verticalId, testName, testName.toLowerCase().replace(/_/g, '-'), adminId]);

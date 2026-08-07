@@ -2,8 +2,8 @@ import axios from 'axios';
 
 const API_URL = 'http://localhost:5000/api/v1';
 const superAdminCredentials = {
-  email: 'admin@gmail.com',
-  password: 'admin123'
+  email: 'adminofleads@gmail.com',
+  password: 'hile@dsbase@123'
 };
 
 async function test() {

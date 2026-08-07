@@ -19,9 +19,9 @@ describe('POST /api/v1/client-errors', () => {
     beforeAll(async () => {
         const loginRes = await request(app)
             .post('/api/v1/auth/login')
-            .send({ email: 'admin@gmail.com', password: 'admin123' });
+            .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
         adminToken = loginRes.body.data?.accessToken;
-        const meRes = await query("SELECT id FROM users WHERE email = 'admin@gmail.com'");
+        const meRes = await query("SELECT id FROM users WHERE email = 'adminofleads@gmail.com'");
         adminUserId = meRes.rows[0]?.id;
     });
 

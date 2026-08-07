@@ -87,7 +87,7 @@ async function seed() {
         console.log('🌱 Starting seeding of new Verticals & Sub-Verticals...');
 
         // 1. Get default super admin ID for created_by
-        const adminRes = await query("SELECT id FROM users WHERE email = 'admin@gmail.com'");
+        const adminRes = await query("SELECT id FROM users WHERE email = 'adminofleads@gmail.com'");
         const adminId = adminRes.rows[0]?.id || null;
         if (!adminId) {
             console.error('❌ Super Admin user not found. Please run core seed first.');

@@ -7,7 +7,7 @@ test.describe('Leads CRUD E2E Flow', () => {
   test.beforeEach(async ({ request, page }) => {
     // 1. Login via API to setup data
     const loginRes = await request.post('/api/v1/auth/login', {
-      data: { email: 'admin@gmail.com', password: 'admin123' }
+      data: { email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' }
     });
     const { accessToken } = (await loginRes.json()).data;
 
@@ -27,8 +27,8 @@ test.describe('Leads CRUD E2E Flow', () => {
 
     // 4. Perform standard login E2E flow
     await page.goto('/login');
-    await page.fill('input[type="email"]', 'admin@gmail.com');
-    await page.fill('input[type="password"]', 'admin123');
+    await page.fill('input[type="email"]', 'adminofleads@gmail.com');
+    await page.fill('input[type="password"]', 'hile@dsbase@123');
     await page.click('button[type="submit"]');
     await page.waitForURL('**/leads**');
     

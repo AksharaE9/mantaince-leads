@@ -45,7 +45,7 @@ async function cleanup() {
 
         // 2. Fetch the remaining real verticals to verify and cleanup their sub-verticals
         const verticalsRes = await query('SELECT id, name, slug FROM verticals');
-        const adminRes = await query("SELECT id FROM users WHERE email = 'admin@gmail.com'");
+        const adminRes = await query("SELECT id FROM users WHERE email = 'adminofleads@gmail.com'");
         const adminId = adminRes.rows[0]?.id || null;
 
         for (const v of verticalsRes.rows) {

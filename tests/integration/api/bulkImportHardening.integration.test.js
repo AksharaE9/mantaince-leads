@@ -44,7 +44,7 @@ describe('Bulk Lead Import Pipeline Hardening', () => {
     beforeAll(async () => {
         const loginRes = await request(app)
             .post('/api/v1/auth/login')
-            .send({ email: 'admin@gmail.com', password: 'admin123' });
+            .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
         adminToken = loginRes.body.data?.accessToken;
 
         const vertRes = await request(app)
@@ -53,7 +53,7 @@ describe('Bulk Lead Import Pipeline Hardening', () => {
             .send({ name: `Bulk Hardening Test ${Date.now()}` });
         verticalId = vertRes.body.data?.id;
 
-        const agentRes = await query("SELECT id FROM users WHERE email = 'admin@gmail.com'");
+        const agentRes = await query("SELECT id FROM users WHERE email = 'adminofleads@gmail.com'");
         agentId = agentRes.rows[0].id;
 
         // Ensure Super Admin has vertical access so employee resolution passes

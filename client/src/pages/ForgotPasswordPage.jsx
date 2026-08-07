@@ -90,7 +90,7 @@ export const ForgotPasswordPage = () => {
                 <input
                   type="email"
                   className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-[--text-primary] focus:outline-none focus:border-[--accent]"
-                  placeholder="e.g. admin@gmail.com"
+                  placeholder="e.g. adminofleads@gmail.com"
                   {...register('email')}
                   disabled={isSubmitting}
                 />

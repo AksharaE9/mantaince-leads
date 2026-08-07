@@ -209,8 +209,7 @@ re-authenticate.
   delete them in `afterAll`. Verify manually after a session that no stray
   test verticals/rows are left behind (`SELECT name FROM verticals WHERE
   name LIKE '%Test%'` is a quick check).
-- The admin login used across integration tests: `admin@gmail.com` /
-  `admin123` (super_admin role, has `'*'` permission wildcard).
+- The admin login used across integration tests: `adminofleads@gmail.com` / `hile@dsbase@123` (super_admin role, has `'*'` permission wildcard).
 
 ## Known intentional product decisions (Raw Data feature)
 

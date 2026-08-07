@@ -17,7 +17,7 @@ describe('Raw Data API', () => {
     beforeAll(async () => {
         const loginRes = await request(app)
             .post('/api/v1/auth/login')
-            .send({ email: 'admin@gmail.com', password: 'admin123' });
+            .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
         adminToken = loginRes.body.data?.accessToken;
 
         const vertRes = await request(app)
@@ -28,7 +28,7 @@ describe('Raw Data API', () => {
 
         // Reuse the logged-in admin as the "employee" for resolution tests —
         // avoids provisioning a whole new user just to test name matching.
-        const meRes = await query('SELECT id, name FROM users WHERE email = $1', ['admin@gmail.com']);
+        const meRes = await query('SELECT id, name FROM users WHERE email = $1', ['adminofleads@gmail.com']);
         agentId = meRes.rows[0]?.id;
         await query('UPDATE users SET vertical_access = array_append(vertical_access, $1) WHERE id = $2', [verticalId, agentId]);
     });

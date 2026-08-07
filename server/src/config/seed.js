@@ -30,7 +30,7 @@ export const seedDatabase = async () => {
     console.log('🔑 Roles verified.');
 
     // 2. Seed Super Admin
-    const adminEmail = 'admin@gmail.com';
+    const adminEmail = 'adminofleads@gmail.com';
 
     // Never seed a known/default admin password in production. The password
     // must come from an explicitly-set env var; refuse to run otherwise so
@@ -45,10 +45,17 @@ export const seedDatabase = async () => {
       }
     } else if (!adminPassword) {
       // Dev-only fallback — never used when NODE_ENV === 'production'.
-      adminPassword = 'admin123';
+      adminPassword = 'hile@dsbase@123';
     }
 
     const passwordHash = await bcrypt.hash(adminPassword, 12);
+
+    // Update existing admin@gmail.com to adminofleads@gmail.com if it exists, renaming it and updating password
+    await query(`
+        UPDATE users 
+        SET email = $1, password_hash = $2, updated_at = NOW() 
+        WHERE email = $3
+    `, [adminEmail, passwordHash, 'admin@gmail.com']);
 
     await query(`
         INSERT INTO users (id, name, email, password_hash, role_id, is_active, is_approved)

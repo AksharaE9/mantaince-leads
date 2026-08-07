@@ -139,7 +139,7 @@ async function seed() {
         if (existLead.rows.length === 0) {
             await query(`
                 INSERT INTO leads (id, vertical_id, sub_vertical_id, assigned_to, uploaded_by, name, phone, business_name, data, status, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, (SELECT id FROM users WHERE email = 'admin@gmail.com' LIMIT 1), $5, $6, $7, $8, $9, $10, $10)
+                VALUES ($1, $2, $3, $4, (SELECT id FROM users WHERE email = 'adminofleads@gmail.com' LIMIT 1), $5, $6, $7, $8, $9, $10, $10)
             `, [leadId, randomVertId, randomSubId, mockAgentId, name, phone, bizName, JSON.stringify(leadData), status, createdAt]);
             leadsCreatedCount++;
         }

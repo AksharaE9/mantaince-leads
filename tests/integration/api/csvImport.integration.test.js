@@ -11,7 +11,7 @@ describe('Bulk lead-import API (CSV/Excel) — regression coverage', () => {
   beforeAll(async () => {
     const loginRes = await request(app)
       .post('/api/v1/auth/login')
-      .send({ email: 'admin@gmail.com', password: 'admin123' });
+      .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
     adminToken = loginRes.body.data?.accessToken;
 
     const vertRes = await request(app)
@@ -200,14 +200,17 @@ describe('Bulk lead-import API (CSV/Excel) — regression coverage', () => {
     const otherMockBatchId = '00000000-0000-0000-0000-444455556666';
 
     beforeAll(async () => {
-      // Create agent user with same password as admin ('admin123')
-      const adminRes = await query('SELECT password_hash FROM users WHERE email = $1', ['admin@gmail.com']);
+      agentUserId = '00000000-0000-0000-0000-999988887777';
+      // Clean up stale records from previous failed runs
+      await query('DELETE FROM csv_upload_logs WHERE id IN ($1, $2)', [mockBatchId, otherMockBatchId]);
+      await query('DELETE FROM users WHERE id = $1 OR email = $2', [agentUserId, 'agent-test@gmail.com']);
+
+      // Create agent user with same password as admin ('hile@dsbase@123')
+      const adminRes = await query('SELECT password_hash FROM users WHERE email = $1', ['adminofleads@gmail.com']);
       const adminHash = adminRes.rows[0].password_hash;
       
       const agentRoleRes = await query("SELECT id FROM roles WHERE name = 'agent'");
       const agentRoleId = agentRoleRes.rows[0].id;
-      
-      agentUserId = '00000000-0000-0000-0000-999988887777';
       await query(`
         INSERT INTO users (id, name, email, password_hash, role_id, is_active, is_approved, vertical_access)
         VALUES ($1, $2, $3, $4, $5, true, true, $6)
@@ -216,7 +219,7 @@ describe('Bulk lead-import API (CSV/Excel) — regression coverage', () => {
       // Login as agent
       const loginRes = await request(app)
         .post('/api/v1/auth/login')
-        .send({ email: 'agent-test@gmail.com', password: 'admin123' });
+        .send({ email: 'agent-test@gmail.com', password: 'hile@dsbase@123' });
       agentToken = loginRes.body.data?.accessToken;
 
       // Insert mock CSV upload log for the agent
@@ -226,7 +229,7 @@ describe('Bulk lead-import API (CSV/Excel) — regression coverage', () => {
       `, [mockBatchId, agentUserId, verticalId]);
 
       // Insert mock CSV upload log for another user (e.g. adminId)
-      const adminMe = await query('SELECT id FROM users WHERE email = $1', ['admin@gmail.com']);
+      const adminMe = await query('SELECT id FROM users WHERE email = $1', ['adminofleads@gmail.com']);
       const adminId = adminMe.rows[0].id;
       await query(`
         INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status)

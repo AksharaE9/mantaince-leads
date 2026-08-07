@@ -21,7 +21,7 @@ async function seed() {
     console.log('🌱 Seeding performance data...');
 
     // 1. Get admin user
-    const adminRes = await query("SELECT id FROM users WHERE email = 'admin@gmail.com'");
+    const adminRes = await query("SELECT id FROM users WHERE email = 'adminofleads@gmail.com'");
     const adminId = adminRes.rows[0]?.id;
     if (!adminId) {
         console.error("❌ Admin user not found");

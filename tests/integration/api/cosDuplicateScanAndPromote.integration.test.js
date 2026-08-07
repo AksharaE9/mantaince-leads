@@ -17,7 +17,7 @@ describe('COS duplicate scan + promote to follow-ups', () => {
   beforeAll(async () => {
     const loginRes = await request(app)
       .post('/api/v1/auth/login')
-      .send({ email: 'admin@gmail.com', password: 'admin123' });
+      .send({ email: 'adminofleads@gmail.com', password: 'hile@dsbase@123' });
     adminToken = loginRes.body.data?.accessToken;
 
     const vertRes = await request(app)
@@ -32,7 +32,7 @@ describe('COS duplicate scan + promote to follow-ups', () => {
       .send({ name: 'Standard' });
     subVerticalId = svRes.body.data?.id;
 
-    const meRes = await query("SELECT id FROM users WHERE email = 'admin@gmail.com'");
+    const meRes = await query("SELECT id FROM users WHERE email = 'adminofleads@gmail.com'");
     agentId = meRes.rows[0]?.id;
   });
 
@@ -151,7 +151,7 @@ describe('COS duplicate scan + promote to follow-ups', () => {
     it('agentId filters to only that agent\'s records (uploaded_by OR assigned_to)', async () => {
       await seedDuplicatePair('9700000004', { assignedTo: agentId });
       const otherPhone = '9700000005';
-      const otherUploaderRes = await query("SELECT id FROM users WHERE email != 'admin@gmail.com' LIMIT 1");
+      const otherUploaderRes = await query("SELECT id FROM users WHERE email != 'adminofleads@gmail.com' LIMIT 1");
       const otherUploader = otherUploaderRes.rows[0]?.id || agentId;
       await query(
         `INSERT INTO cost_conversions (id, vertical_id, sub_vertical_id, uploaded_by, name, phone, business_name, status, lead_type, created_at)
