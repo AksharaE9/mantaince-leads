@@ -23,12 +23,7 @@ import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ── CSV formula-injection guard (H5) ────────────────────────────────────────
-// Prefix any value whose first character Excel/Sheets treats as a formula
-// trigger (=, +, -, @, tab, CR) with a literal single-quote BEFORE the
-// normal quote-doubling/wrapping runs, so a value like `=cmd|'/c calc'!A1`
-// downloads as literal text instead of executing as a formula when an admin
-// opens the exported file.
+// CSV formula-injection guard
 const sanitizeCsvValue = (val) => {
     const s = String(val ?? '');
     return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
@@ -36,8 +31,6 @@ const sanitizeCsvValue = (val) => {
 
 /**
  * GET /raw-data
- * Same empty/omitted-query-param safety as getCostConversions — none of
- * these ever reach a WHERE clause unless present and well-formed.
  */
 export const getRawData = async (req, res) => {
     const { verticalId, page = 1, limit = 25, sortBy, sortDir } = req.query;
@@ -63,9 +56,17 @@ export const getRawData = async (req, res) => {
         const sortDirection = sortDir === 'asc' ? 'ASC' : 'DESC';
 
         const sql = `
-            SELECT r.*, u.name AS assignee_name
+            SELECT r.*, 
+                   COALESCE(r.lead_name, r.business_name) AS display_name,
+                   COALESCE(r.product_service, r.business_type) AS display_product,
+                   COALESCE(r.map_location, r.address) AS display_location,
+                   COALESCE(r.follow_up_date, r.appointment_date) AS display_follow_up_date,
+                   COALESCE(r.follow_up_time, r.appointment_timings) AS display_follow_up_time,
+                   u.name AS assignee_name,
+                   sv.name AS sub_vertical_name
             FROM raw_data r
             LEFT JOIN users u ON u.id = r.assigned_user_id
+            LEFT JOIN sub_verticals sv ON sv.id = r.sub_vertical_id
             WHERE ${wheres.join(' AND ')}
             ORDER BY ${sortCol} ${sortDirection}
             LIMIT $${pIdx} OFFSET $${pIdx + 1}
@@ -91,26 +92,27 @@ export const getRawData = async (req, res) => {
 };
 
 /**
- * GET /raw-data/export/csv — exports the same rows the list endpoint would
- * return for the given filters (minus pagination), using the exact same
- * `buildRawDataFilters` builder so export and list can never disagree about
- * what a filter matches. Simple string-build, not a DB-cursor stream —
- * proportionate to this entity's expected row counts (see leadImportTemplate
- * / costConversions.js's streaming export, which is sized for a much larger
- * dataset than Raw Data currently has).
+ * GET /raw-data/export/csv
  */
 const RAW_DATA_EXPORT_MAPPERS = {
-    date: r => r.date_str,
-    employeeName: r => r.assignee_name,
-    businessType: r => r.business_type,
-    businessName: r => r.business_name,
-    area: r => r.area,
-    city: r => r.city,
-    phoneNumber: r => r.phone_number,
-    address: r => r.address,
-    appointmentDate: r => r.appointment_date_str,
-    appointmentTimings: r => r.appointment_timings,
-    remarks: r => r.remarks,
+    date: r => r.date_str || '',
+    employeeName: r => r.assignee_name || r.employee_name_raw || '',
+    productService: r => r.product_service || r.business_type || '',
+    leadName: r => r.lead_name || r.business_name || '',
+    contactPerson: r => r.contact_person || '',
+    phoneNumber: r => r.phone_number || '',
+    alternateNumber: r => r.alternate_number || '',
+    city: r => r.city || '',
+    area: r => r.area || '',
+    mapLocation: r => r.map_location || r.address || '',
+    callStatus: r => r.call_status || '',
+    customerResponse: r => r.customer_response || '',
+    followUpRequired: r => r.follow_up_required || '',
+    followUpDate: r => r.follow_up_date_str || r.appointment_date_str || '',
+    followUpTime: r => r.follow_up_time || r.appointment_timings || '',
+    nextAction: r => r.next_action || '',
+    remarks: r => r.remarks || '',
+    converted: r => r.converted || '',
 };
 
 export const exportRawDataCsv = async (req, res) => {
@@ -132,13 +134,10 @@ export const exportRawDataCsv = async (req, res) => {
         const sortCol = resolveRawDataSortColumn(sortBy);
         const sortDirection = sortDir === 'asc' ? 'ASC' : 'DESC';
 
-        // to_char formats dates server-side in SQL — avoids re-interpreting a
-        // pg DATE-typed Date object through a JS timezone (see CLAUDE.md's
-        // documented exceljs date gotcha; same class of bug, avoided the
-        // same way here).
         const rowsRes = await query(`
             SELECT r.*, u.name AS assignee_name,
                 to_char(r.date, 'YYYY-MM-DD') AS date_str,
+                to_char(r.follow_up_date, 'YYYY-MM-DD') AS follow_up_date_str,
                 to_char(r.appointment_date, 'YYYY-MM-DD') AS appointment_date_str
             FROM raw_data r
             LEFT JOIN users u ON u.id = r.assigned_user_id
@@ -163,14 +162,16 @@ export const exportRawDataCsv = async (req, res) => {
 
 /**
  * POST /raw-data
- * Single-Add — runs through the exact same validateRawDataRow() the bulk
- * upload path uses, so the two can never disagree about what's valid.
+ * Single-Add endpoint
  */
 export const createRawData = async (req, res) => {
-    const { verticalId } = req.body;
+    const { verticalId, subVerticalId } = req.body;
     try {
         if (!verticalId || !isValidUUID(verticalId)) {
             return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'A valid verticalId is required', section: 'raw_data', operation: 'single_add', field: 'verticalId' });
+        }
+        if (subVerticalId && !isValidUUID(subVerticalId)) {
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'Invalid subVerticalId format', section: 'raw_data', operation: 'single_add', field: 'subVerticalId' });
         }
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
             return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section: 'raw_data', operation: 'single_add' });
@@ -184,15 +185,22 @@ export const createRawData = async (req, res) => {
         const row = {
             date: req.body.date,
             employeeName: req.body.employeeName,
-            businessType: req.body.businessType,
-            businessName: req.body.businessName,
-            area: req.body.area,
+            productService: req.body.productService || req.body.businessType,
+            leadName: req.body.leadName || req.body.businessName,
+            contactPerson: req.body.contactPerson,
+            phoneNumber: req.body.phoneNumber || req.body.mobileNumber,
+            alternateNumber: req.body.alternateNumber,
             city: req.body.city,
-            phoneNumber: req.body.phoneNumber,
-            address: req.body.address,
-            appointmentDate: req.body.appointmentDate,
-            appointmentTimings: req.body.appointmentTimings,
+            area: req.body.area,
+            mapLocation: req.body.mapLocation || req.body.address,
+            callStatus: req.body.callStatus,
+            customerResponse: req.body.customerResponse,
+            followUpRequired: req.body.followUpRequired,
+            followUpDate: req.body.followUpDate || req.body.appointmentDate,
+            followUpTime: req.body.followUpTime || req.body.appointmentTimings,
+            nextAction: req.body.nextAction,
             remarks: req.body.remarks,
+            converted: req.body.converted,
         };
 
         const { errors, warnings, assignedUserId, employeeNameRaw } = validateRawDataRow(row, { agents, knownBusinessTypes });
@@ -207,37 +215,51 @@ export const createRawData = async (req, res) => {
         }
 
         const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
-        const dupRes = await query(
-            'SELECT id FROM raw_data WHERE vertical_id = $1 AND phone_number = $2 AND is_deleted = false LIMIT 1',
-            [verticalId, phone]
-        );
+        let dupRes;
+        if (subVerticalId) {
+            dupRes = await query(
+                'SELECT id, lead_name, business_name, contact_person FROM raw_data WHERE vertical_id = $1 AND sub_vertical_id = $2 AND phone_number = $3 AND is_deleted = false LIMIT 1',
+                [verticalId, subVerticalId, phone]
+            );
+        } else {
+            dupRes = await query(
+                'SELECT id, lead_name, business_name, contact_person FROM raw_data WHERE vertical_id = $1 AND phone_number = $2 AND is_deleted = false LIMIT 1',
+                [verticalId, phone]
+            );
+        }
         if (dupRes.rows.length > 0) {
+            const conflictName = dupRes.rows[0].lead_name || dupRes.rows[0].business_name || dupRes.rows[0].contact_person || 'existing record';
             return operationError(res, {
                 status: 409, code: ErrorCodes.DUPLICATE_PHONE,
-                message: `Phone number ${phone} already exists in Raw Data for this vertical`,
+                message: `Mobile number ${phone} already exists in Raw Data for this section (conflicts with "${conflictName}")`,
                 section: 'raw_data', operation: 'single_add', field: 'phoneNumber', recordId: dupRes.rows[0].id,
             });
         }
 
         const id = crypto.randomUUID();
+        const leadNameVal = row.leadName || null;
+        const prodVal = row.productService || null;
+        const mapVal = row.mapLocation || null;
+        const followUpDateVal = parseFlexibleDate(row.followUpDate);
+        const followUpTimeVal = row.followUpTime || null;
+
         const insertRes = await query(`
             INSERT INTO raw_data (
-                id, vertical_id, assigned_user_id, date, business_type, business_name,
-                area, city, phone_number, address, appointment_date, appointment_timings,
-                remarks, source, created_by, employee_name_raw
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'single_add',$14,$15)
+                id, vertical_id, sub_vertical_id, assigned_user_id, date,
+                product_service, lead_name, contact_person, phone_number, alternate_number,
+                city, area, map_location, call_status, customer_response,
+                follow_up_required, follow_up_date, follow_up_time, next_action,
+                remarks, converted, business_type, business_name, address,
+                appointment_date, appointment_timings, source, created_by, employee_name_raw
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,'single_add',$27,$28)
             RETURNING *
         `, [
-            id, verticalId, assignedUserId,
-            // Parsed the same way the bulk-upload processors do (ISO,
-            // DD-MM-YYYY/DD-MM-YY, Excel serial) rather than handing the raw
-            // string straight to Postgres's DATE column, whose own parsing
-            // depends on the server's DateStyle setting and isn't guaranteed
-            // to agree with this app's DD-MM-YYYY convention.
-            parseFlexibleDate(row.date), row.businessType || null, row.businessName || null,
-            row.area || null, row.city || null, phone, row.address || null,
-            parseFlexibleDate(row.appointmentDate), row.appointmentTimings || null,
-            row.remarks || null, req.user.sub, employeeNameRaw || null,
+            id, verticalId, subVerticalId || null, assignedUserId, parseFlexibleDate(row.date),
+            prodVal, leadNameVal, row.contactPerson || null, phone, row.alternateNumber || null,
+            row.city || null, row.area || null, mapVal, row.callStatus || null, row.customerResponse || null,
+            row.followUpRequired || null, followUpDateVal, followUpTimeVal, row.nextAction || null,
+            row.remarks || null, row.converted || null, prodVal, leadNameVal, mapVal,
+            followUpDateVal, followUpTimeVal, req.user.sub, employeeNameRaw || null,
         ]);
 
         logAudit(req, { action: 'raw_data.create', targetCollection: 'raw_data', targetId: id, after: insertRes.rows[0] });
@@ -250,9 +272,7 @@ export const createRawData = async (req, res) => {
 };
 
 /**
- * GET /raw-data/import-template — dynamic CSV/XLSX template, same schema
- * the bulk validator enforces. Vertical is only used to resolve the live
- * Employee Name dropdown list — it is never a column in the template.
+ * GET /raw-data/import-template
  */
 export const downloadRawDataTemplate = async (req, res) => {
     const { verticalId } = req.query;
@@ -264,14 +284,25 @@ export const downloadRawDataTemplate = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
         }
 
-        // Sample dates use DD-MM-YYYY — matches this app's own forms (e.g. the
-        // Edit COS panel's `dd-mm-yyyy` placeholder) and is explicitly accepted
-        // by parseFlexibleDate (server/src/services/rawDataImportSchema.js).
         const sampleValues = {
-            date: '24-07-2026', employeeName: 'Jane Doe', businessType: 'Retail',
-            businessName: 'Acme Traders', area: 'Whitefield', city: 'Bengaluru',
-            phoneNumber: '9876543210', address: '123 Main Street',
-            appointmentDate: '01-08-2026', appointmentTimings: '11:00 AM', remarks: 'Interested',
+            date: '24-07-2026',
+            employeeName: 'Jane Doe',
+            productService: 'Software Solutions',
+            leadName: 'Acme Enterprises',
+            contactPerson: 'John Smith',
+            phoneNumber: '9876543210',
+            alternateNumber: '9123456780',
+            city: 'Bengaluru',
+            area: 'Whitefield',
+            mapLocation: 'https://maps.google.com/?q=12.9716,77.5946',
+            callStatus: 'Connected',
+            customerResponse: 'Interested in demo',
+            followUpRequired: 'Yes',
+            followUpDate: '01-08-2026',
+            followUpTime: '11:00 AM',
+            nextAction: 'Schedule product demo',
+            remarks: 'High potential lead',
+            converted: 'N',
         };
 
         if (req.query.format === 'xlsx') {
@@ -297,8 +328,7 @@ export const downloadRawDataTemplate = async (req, res) => {
 };
 
 /**
- * GET /raw-data/schema — same schema JSON both the template and the
- * validator use, exposed so the frontend can pre-validate identically.
+ * GET /raw-data/schema
  */
 export const getRawDataSchema = async (req, res) => {
     try {
@@ -310,17 +340,17 @@ export const getRawDataSchema = async (req, res) => {
 
 /**
  * POST /raw-data/upload
- * Queues the file the same way uploadCsv (csv.js) does for Leads — same
- * csv_upload_logs table, discriminated by entity_type='raw_data' so the
- * shared worker loop and log/status/error-report endpoints all just work.
  */
 export const uploadRawDataCsv = async (req, res) => {
-    const { verticalId } = req.body;
+    const { verticalId, subVerticalId } = req.body;
     const file = req.file;
     try {
         if (!file) return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'A CSV or Excel file is required', section: 'raw_data', operation: 'bulk_upload', field: 'file' });
         if (!verticalId || !isValidUUID(verticalId)) {
             return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'A valid verticalId is required', section: 'raw_data', operation: 'bulk_upload', field: 'verticalId' });
+        }
+        if (subVerticalId && !isValidUUID(subVerticalId)) {
+            return operationError(res, { code: ErrorCodes.INVALID_FORMAT, message: 'Invalid subVerticalId format', section: 'raw_data', operation: 'bulk_upload', field: 'subVerticalId' });
         }
         if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(verticalId))) {
             return operationError(res, { status: 403, code: ErrorCodes.FORBIDDEN, message: 'Access forbidden: you do not have access to this business vertical', section: 'raw_data', operation: 'bulk_upload' });
@@ -331,17 +361,14 @@ export const uploadRawDataCsv = async (req, res) => {
         const fileName = `${logId}${fileExt}`;
 
         if (process.env.VERCEL) {
-            // Vercel Serverless environment: bypass disk writes and run processing inline
             const logRes = await query(`
-                INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type)
-                VALUES ($1, $2, $3, $4, $5, 'processing', 'raw_data')
+                INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, sub_vertical_id, file_name, original_file_name, status, entity_type)
+                VALUES ($1, $2, $3, $4, $5, $6, 'processing', 'raw_data')
                 RETURNING *
-            `, [logId, req.user.sub, verticalId, fileName, file.originalname]);
+            `, [logId, req.user.sub, verticalId, subVerticalId || null, fileName, file.originalname]);
 
             const uploadLog = logRes.rows[0];
 
-            // Never let an audit-log failure abort before the background job is
-            // registered — that would strand the row at 'processing' forever.
             await logAudit(req, {
                 action: 'raw_data.upload_processing_vercel',
                 targetCollection: 'csv_upload_logs',
@@ -354,6 +381,7 @@ export const uploadRawDataCsv = async (req, res) => {
                     batchId: uploadLog.id,
                     fileBufferBase64: file.buffer.toString('base64'),
                     verticalId,
+                    subVerticalId: subVerticalId || null,
                     uploadedBy: req.user.sub,
                     fileExt
                 },
@@ -362,9 +390,6 @@ export const uploadRawDataCsv = async (req, res) => {
                 }
             };
 
-            // Kick off RawData processing in the background (non-blocking for
-            // Vercel) — see server/src/utils/background.js for why this can't
-            // be a bare unawaited promise.
             runInBackground(
                 import('../jobs/rawDataProcessor.js').then(({ processRawDataJob }) => processRawDataJob(mockJob)),
                 { batchId: uploadLog.id, label: 'RawData' }
@@ -382,10 +407,10 @@ export const uploadRawDataCsv = async (req, res) => {
         fs.writeFileSync(uploadPath, file.buffer);
 
         const logRes = await query(`
-            INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type)
-            VALUES ($1, $2, $3, $4, $5, 'queued', 'raw_data')
+            INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, sub_vertical_id, file_name, original_file_name, status, entity_type)
+            VALUES ($1, $2, $3, $4, $5, $6, 'queued', 'raw_data')
             RETURNING *
-        `, [logId, req.user.sub, verticalId, fileName, file.originalname]);
+        `, [logId, req.user.sub, verticalId, subVerticalId || null, fileName, file.originalname]);
 
         const uploadLog = logRes.rows[0];
         await logAudit(req, {

@@ -77,12 +77,12 @@ export function validateDeliveryDataRow(row, { agents, knownBusinessTypes }) {
     // fallback rule Raw Data already uses for Appointment-Date-vs-Date.
     const deliveryDateParsed = parseFlexibleDate(deliveryDateValue);
     const dateParsed = parseFlexibleDate(row.date);
-    const apptParsed = parseFlexibleDate(row.appointmentDate);
+    const apptParsed = parseFlexibleDate(row.followUpDate || row.appointmentDate);
     if (deliveryDateParsed && dateParsed && deliveryDateParsed < dateParsed) {
         warnings.push({ field: 'deliveryDate', message: 'Delivery Date is earlier than the visit Date — accepted, please verify' });
     }
     if (deliveryDateParsed && apptParsed && deliveryDateParsed < apptParsed) {
-        warnings.push({ field: 'deliveryDate', message: 'Delivery Date is earlier than the Appointment Date — accepted, please verify' });
+        warnings.push({ field: 'deliveryDate', message: 'Delivery Date is earlier than the Appointment / Follow-up Date — accepted, please verify' });
     }
 
     return { errors, warnings, assignedUserId, employeeNameRaw };

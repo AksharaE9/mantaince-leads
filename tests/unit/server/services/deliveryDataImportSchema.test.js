@@ -12,10 +12,12 @@ const AGENTS = [
 ];
 
 describe('DELIVERY_DATA_FIELDS', () => {
-    it('has the 11 shared Raw Data fields plus Delivery Date/Delivery Time appended at the end, in order', () => {
+    it('has the shared Raw Data fields plus Delivery Date/Delivery Time appended at the end, in order', () => {
         expect(DELIVERY_DATA_FIELDS.map(f => f.key)).toEqual([
-            'date', 'employeeName', 'businessType', 'businessName', 'area', 'city',
-            'phoneNumber', 'address', 'appointmentDate', 'appointmentTimings', 'remarks',
+            'date', 'employeeName', 'productService', 'leadName', 'contactPerson',
+            'phoneNumber', 'alternateNumber', 'city', 'area', 'mapLocation',
+            'callStatus', 'customerResponse', 'followUpRequired', 'followUpDate',
+            'followUpTime', 'nextAction', 'remarks', 'converted',
             'deliveryDate', 'deliveryTime',
         ]);
     });
@@ -37,14 +39,15 @@ describe('validateDeliveryDataRow', () => {
     const baseRow = {
         date: '2026-07-24',
         employeeName: 'Priya Sharma',
-        businessType: 'Retail',
-        businessName: 'Acme Traders',
+        productService: 'Retail',
+        leadName: 'Acme Traders',
+        contactPerson: 'John Doe',
         area: 'Whitefield',
         city: 'Bengaluru',
         phoneNumber: '9876543210',
-        address: '123 Main Street',
-        appointmentDate: '2026-08-01',
-        appointmentTimings: '11:00 AM',
+        mapLocation: '123 Main Street',
+        followUpDate: '2026-08-01',
+        followUpTime: '11:00 AM',
         remarks: 'Interested',
         deliveryDate: '2026-08-05',
         deliveryTime: '2:00 PM - 3:00 PM',
@@ -58,12 +61,8 @@ describe('validateDeliveryDataRow', () => {
         expect(assignedUserId).toBe('u3');
     });
 
-    // Phone-number-only-mandatory policy (see CLAUDE.md): reuses the shared
-    // Raw Data validator, which now only hard-requires Phone Number — a blank
-    // Date/Business Name/Employee Name is accepted (warned on where
-    // applicable), matching every other section.
-    it('reuses the shared-field validator: requires only Phone Number; blank Date/Business Name/unresolved Employee Name warn instead of block', () => {
-        const { errors, warnings } = validateDeliveryDataRow({ ...baseRow, date: '', businessName: '', phoneNumber: '', employeeName: 'Nobody Here' }, ctx);
+    it('reuses the shared-field validator: requires only Phone Number; blank Date/Lead Name/unresolved Employee Name warn instead of block', () => {
+        const { errors, warnings } = validateDeliveryDataRow({ ...baseRow, date: '', leadName: '', phoneNumber: '', employeeName: 'Nobody Here' }, ctx);
         const errorFields = errors.map(e => e.field);
         expect(errorFields).toEqual(['phoneNumber']);
         expect(warnings.some(w => w.field === 'employeeName')).toBe(true);
@@ -74,20 +73,13 @@ describe('validateDeliveryDataRow', () => {
         expect(errors.some(e => e.field === 'deliveryDate')).toBe(false);
     });
 
-    // Step 3 of the phone-number-only-mandatory policy: a present-but-
-    // unparseable Delivery Date is a warning, not a hard reject — the row
-    // still inserts with that field left blank. This is the exact field/
-    // error message ("Delivery Date is not a valid date") that hard-blocked
-    // all 55 rows of the real Delivery Data upload this fix responds to.
     it('warns (does not reject) on an unparseable Delivery Date', () => {
         const { errors, warnings } = validateDeliveryDataRow({ ...baseRow, deliveryDate: 'not-a-date' }, ctx);
         expect(errors.some(e => e.field === 'deliveryDate')).toBe(false);
         expect(warnings.some(w => w.field === 'deliveryDate')).toBe(true);
     });
 
-    it('parses the real-world DD-MM-YY / DD-MM-YYYY dash formats from the failed upload with no "unparseable" warning', () => {
-        // deliberately on/after baseRow's Date and Appointment Date so this
-        // isolates the parse check from the separate "earlier than" warning.
+    it('parses the real-world DD-MM-YY / DD-MM-YYYY dash formats with no "unparseable" warning', () => {
         const { warnings } = validateDeliveryDataRow({ ...baseRow, deliveryDate: '05-08-2026' }, ctx);
         expect(warnings.some(w => w.field === 'deliveryDate' && /could not be parsed/.test(w.message))).toBe(false);
     });
@@ -97,7 +89,7 @@ describe('validateDeliveryDataRow', () => {
         expect(errors.some(e => e.field === 'deliveryTime')).toBe(false);
     });
 
-    it('accepts a Delivery Time range string, same free-text convention as Appointment Timings', () => {
+    it('accepts a Delivery Time range string', () => {
         const { errors } = validateDeliveryDataRow({ ...baseRow, deliveryTime: '10 AM - 12 PM' }, ctx);
         expect(errors).toEqual([]);
     });
@@ -113,10 +105,10 @@ describe('validateDeliveryDataRow', () => {
         expect(warnings.some(w => w.field === 'deliveryDate' && /earlier than the visit Date/.test(w.message))).toBe(true);
     });
 
-    it('warns (does not reject) when Delivery Date is earlier than the Appointment Date', () => {
-        const { errors, warnings } = validateDeliveryDataRow({ ...baseRow, date: '2026-07-01', appointmentDate: '2026-08-10', deliveryDate: '2026-08-05' }, ctx);
+    it('warns (does not reject) when Delivery Date is earlier than the Appointment / Follow-up Date', () => {
+        const { errors, warnings } = validateDeliveryDataRow({ ...baseRow, date: '2026-07-01', followUpDate: '2026-08-10', deliveryDate: '2026-08-05' }, ctx);
         expect(errors).toEqual([]);
-        expect(warnings.some(w => w.field === 'deliveryDate' && /earlier than the Appointment Date/.test(w.message))).toBe(true);
+        expect(warnings.some(w => w.field === 'deliveryDate' && /earlier than the Appointment/.test(w.message))).toBe(true);
     });
 
     it('does not warn when Delivery Date is on/after both Date and Appointment Date', () => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Filter, Download, Upload, Plus, ChevronLeft, ChevronRight, ChevronDown,
-  FileSpreadsheet, AlertTriangle,
+  FileSpreadsheet, AlertTriangle, Layers,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import axios from '../api/axios.js';
@@ -14,30 +14,7 @@ import SearchableOperatorSelect from './SearchableOperatorSelect.jsx';
 /**
  * Generic, config-driven "section" page shell — Raw Data and Delivery Data
  * are both thin instantiations of this (see pages/RawDataPage.jsx,
- * pages/DeliveryDataPage.jsx). It matches the *pattern* established by
- * LeadsPage.jsx / FollowUpsPositivesPage.jsx (URL-search-params-driven
- * server-side fetch, Prev/Next pagination, loading/empty states) without
- * sharing code with those two pages — they're large, deeply feature-specific
- * monoliths (custom fields, geotag photo upload, bulk status, a calendar
- * panel) that a live retrofit onto a shared shell would put at real
- * regression risk for zero functional gain. See the plan doc for the full
- * reasoning.
- *
- * `config` shape:
- * {
- *   title, description, icon,                    // header
- *   columns: [{ key, label, render?(row) }],      // visible-by-default columns
- *   detailFields: [{ key, label, render?(row) }], // rest, shown in an expandable row
- *   sortableColumns: ['date', 'businessName', ...],// must match the backend's sort whitelist
- *   endpoints: { list, exportCsv },                // base URL strings; query string is built here
- *   filenamePrefix,                                // exported CSV filename prefix
- *   ModalComponent,                                 // RawDataModal | DeliveryDataModal — reused as-is
- *   emptyStateText,
- * }
- *
- * Sorting/filtering/pagination are 100% server-side — the URL search params
- * are the canonical state, exactly like LeadsPage.jsx's `fetchLeads` pattern.
- * No client-side slicing/filtering of `records` happens anywhere here.
+ * pages/DeliveryDataPage.jsx).
  */
 export default function DataSectionPage({ config }) {
   const {
@@ -51,6 +28,7 @@ export default function DataSectionPage({ config }) {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [verticals, setVerticals] = useState([]);
+  const [subVerticals, setSubVerticals] = useState([]);
   const [agents, setAgents] = useState([]);
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
@@ -68,13 +46,17 @@ export default function DataSectionPage({ config }) {
   const search = searchParams.get('q') || '';
   const sortBy = searchParams.get('sortBy') || 'createdAt';
   const sortDir = searchParams.get('sortDir') || 'desc';
+  const subVerticalId = searchParams.get('subVerticalId') || '';
   const dateFrom = searchParams.get('dateFrom') || '';
   const dateTo = searchParams.get('dateTo') || '';
-  const businessType = searchParams.get('businessType') || '';
+  const productService = searchParams.get('productService') || searchParams.get('businessType') || '';
   const city = searchParams.get('city') || '';
+  const area = searchParams.get('area') || '';
+  const callStatus = searchParams.get('callStatus') || '';
+  const converted = searchParams.get('converted') || '';
   const assignedUserId = searchParams.get('assignedUserId') || '';
 
-  const activeFiltersCount = [dateFrom, dateTo, businessType, city, assignedUserId].filter(Boolean).length;
+  const activeFiltersCount = [subVerticalId, dateFrom, dateTo, productService, city, area, callStatus, converted, assignedUserId].filter(Boolean).length;
 
   useEffect(() => { setSearchInput(search); }, [search]);
 
@@ -85,14 +67,26 @@ export default function DataSectionPage({ config }) {
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
 
-  // Same "fetch verticals for the landing selector" pattern as LeadsPage.jsx / FollowUpsPositivesPage.jsx.
   useEffect(() => {
     let cancelled = false;
     axios.get('/api/v1/verticals').then(({ data }) => { if (!cancelled) setVerticals(data.data || []); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
-  // Same global-agents fetch LeadsPage.jsx uses for its operator dropdowns.
+  useEffect(() => {
+    if (!activeVertical) {
+      setSubVerticals([]);
+      return;
+    }
+    let cancelled = false;
+    axios.get(`/api/v1/verticals/${activeVertical._id}/sub-verticals`)
+      .then(({ data }) => {
+        if (!cancelled) setSubVerticals((data.data || []).filter(s => s.isActive !== false && s.is_active !== false));
+      })
+      .catch(() => { if (!cancelled) setSubVerticals([]); });
+    return () => { cancelled = true; };
+  }, [activeVertical]);
+
   useEffect(() => {
     let cancelled = false;
     axios.get('/api/v1/users?active=true').then(({ data }) => {
@@ -111,10 +105,14 @@ export default function DataSectionPage({ config }) {
         verticalId: activeVertical._id, page: String(page), limit: String(limit),
         search, sortBy, sortDir,
       });
+      if (subVerticalId) qParams.set('subVerticalId', subVerticalId);
       if (dateFrom) qParams.set('dateFrom', dateFrom);
       if (dateTo) qParams.set('dateTo', dateTo);
-      if (businessType) qParams.set('businessType', businessType);
+      if (productService) qParams.set('productService', productService);
       if (city) qParams.set('city', city);
+      if (area) qParams.set('area', area);
+      if (callStatus) qParams.set('callStatus', callStatus);
+      if (converted) qParams.set('converted', converted);
       if (assignedUserId) qParams.set('assignedUserId', assignedUserId);
 
       const res = await axios.get(`${endpoints.list}?${qParams.toString()}`);
@@ -129,17 +127,12 @@ export default function DataSectionPage({ config }) {
     } finally {
       setLoading(false);
     }
-  }, [activeVertical, page, limit, search, sortBy, sortDir, dateFrom, dateTo, businessType, city, assignedUserId, endpoints.list, title]);
+  }, [activeVertical, page, limit, search, sortBy, sortDir, subVerticalId, dateFrom, dateTo, productService, city, area, callStatus, converted, assignedUserId, endpoints.list, title]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
 
-  // Real-time sync: a scoped, debounced poll signal (see useRealtimeAssignments.js)
-  // bumps this same trigger LeadsPage/FollowUpsPositivesPage already use —
-  // this page previously didn't react to it at all, so other users' bulk
-  // uploads/edits here only appeared on manual refresh.
   useEffect(() => { if (leadsRefreshTrigger > 0) fetchRecords(); }, [leadsRefreshTrigger]);
 
-  // Debounced search box -> URL, same 400ms convention as LeadsPage.jsx.
   useEffect(() => {
     const t = setTimeout(() => { if (searchInput !== search) updateQueryParam('q', searchInput); }, 400);
     return () => clearTimeout(t);
@@ -161,11 +154,15 @@ export default function DataSectionPage({ config }) {
     if (!activeVertical) return;
     try {
       const qParams = new URLSearchParams({ verticalId: activeVertical._id, sortBy, sortDir });
+      if (subVerticalId) qParams.set('subVerticalId', subVerticalId);
       if (search) qParams.set('search', search);
       if (dateFrom) qParams.set('dateFrom', dateFrom);
       if (dateTo) qParams.set('dateTo', dateTo);
-      if (businessType) qParams.set('businessType', businessType);
+      if (productService) qParams.set('productService', productService);
       if (city) qParams.set('city', city);
+      if (area) qParams.set('area', area);
+      if (callStatus) qParams.set('callStatus', callStatus);
+      if (converted) qParams.set('converted', converted);
       if (assignedUserId) qParams.set('assignedUserId', assignedUserId);
       const res = await axios.get(`${endpoints.exportCsv}?${qParams.toString()}`, { responseType: 'blob' });
       const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
@@ -191,7 +188,8 @@ export default function DataSectionPage({ config }) {
     navigate(`${location.pathname}?verticalId=${v._id}`);
   };
 
-  // ── No vertical selected yet — same landing pattern as Leads/Follow-ups ──
+  const activeSubVerticalName = subVerticals.find(s => s._id === subVerticalId)?.name;
+
   if (!activeVertical) {
     return (
       <div className="space-y-6">
@@ -213,8 +211,12 @@ export default function DataSectionPage({ config }) {
     <div className="space-y-6 animate-in fade-in duration-300">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[--text-primary]">{activeVertical.name} – {title}</h1>
-          <p className="text-sm text-[--text-secondary] mt-1">{description}</p>
+          <h1 className="text-2xl font-bold text-[--text-primary]">
+            {activeSubVerticalName ? `${activeSubVerticalName} – ${title}` : `${activeVertical.name} – ${title}`}
+          </h1>
+          <p className="text-sm text-[--text-secondary] mt-1">
+            {activeSubVerticalName ? `${description} (${activeSubVerticalName})` : description}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {location.pathname !== '/leads' && (
@@ -277,19 +279,49 @@ export default function DataSectionPage({ config }) {
 
       <VerticalSelectionBar verticals={verticals} activeVerticalId={activeVertical._id} onSelect={selectVertical} />
 
+      {subVerticals.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+          <button
+            type="button"
+            onClick={() => updateQueryParam('subVerticalId', null)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+              !subVerticalId
+                ? 'bg-[--accent] text-white border-[--accent] shadow-sm'
+                : 'bg-white text-[--text-secondary] border-[--border] hover:bg-stone-50'
+            }`}
+          >
+            All Sub-Verticals
+          </button>
+          {subVerticals.map((sv) => (
+            <button
+              key={sv._id}
+              type="button"
+              onClick={() => updateQueryParam('subVerticalId', sv._id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                subVerticalId === sv._id
+                  ? 'bg-[--accent] text-white border-[--accent] shadow-sm'
+                  : 'bg-white text-[--text-secondary] border-[--border] hover:bg-stone-50'
+              }`}
+            >
+              {sv.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex flex-col gap-1.5 max-w-sm">
         <span className="text-[10px] font-black uppercase text-[--text-secondary]">Search</span>
         <input
           type="text"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Search business name or phone..."
+          placeholder="Search name, contact, mobile..."
           className="w-full"
         />
       </div>
 
       {showFilters && (
-        <div className="glass-panel border border-[--border] bg-white p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 shadow-sm">
+        <div className="glass-panel border border-[--border] bg-white p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 shadow-sm">
           <div className="flex flex-col gap-1.5">
             <span className="text-[10px] font-black uppercase text-[--text-secondary]">Date From</span>
             <input type="date" value={dateFrom} onChange={(e) => updateQueryParam('dateFrom', e.target.value)} className="w-full" />
@@ -303,14 +335,39 @@ export default function DataSectionPage({ config }) {
             <SearchableOperatorSelect agents={agents} value={assignedUserId} onChange={(v) => updateQueryParam('assignedUserId', v)} placeholder="-- All employees --" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-black uppercase text-[--text-secondary]">Business Type</span>
-            <input type="text" value={businessType} onChange={(e) => updateQueryParam('businessType', e.target.value)} className="w-full" />
+            <span className="text-[10px] font-black uppercase text-[--text-secondary]">Product / Service</span>
+            <input type="text" value={productService} onChange={(e) => updateQueryParam('productService', e.target.value)} className="w-full" />
           </div>
           <div className="flex flex-col gap-1.5">
             <span className="text-[10px] font-black uppercase text-[--text-secondary]">City</span>
             <input type="text" value={city} onChange={(e) => updateQueryParam('city', e.target.value)} className="w-full" />
           </div>
-          <div className="lg:col-span-5 flex justify-end">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-black uppercase text-[--text-secondary]">Area</span>
+            <input type="text" value={area} onChange={(e) => updateQueryParam('area', e.target.value)} className="w-full" />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-black uppercase text-[--text-secondary]">Call Status</span>
+            <select value={callStatus} onChange={(e) => updateQueryParam('callStatus', e.target.value)} className="w-full">
+              <option value="">All Call Statuses</option>
+              <option value="Connected">Connected</option>
+              <option value="Busy">Busy</option>
+              <option value="Not Reachable">Not Reachable</option>
+              <option value="Switched Off">Switched Off</option>
+              <option value="Callback Requested">Callback Requested</option>
+              <option value="Wrong Number">Wrong Number</option>
+              <option value="Disconnected">Disconnected</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-black uppercase text-[--text-secondary]">Converted</span>
+            <select value={converted} onChange={(e) => updateQueryParam('converted', e.target.value)} className="w-full">
+              <option value="">All</option>
+              <option value="Y">Y (Yes)</option>
+              <option value="N">N (No)</option>
+            </select>
+          </div>
+          <div className="lg:col-span-4 flex justify-end">
             <button type="button" onClick={resetAllFilters}
               className="px-4 py-2 border border-[--border-strong] rounded-lg text-sm text-[--text-secondary] font-semibold bg-white hover:bg-stone-50">
               Reset All Filters
@@ -377,11 +434,11 @@ export default function DataSectionPage({ config }) {
                       {expanded && (
                         <tr className="bg-stone-50/50 border-b border-[--border]">
                           <td colSpan={columns.length + 1} className="px-8 py-4">
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 text-xs">
                               {detailFields.map((f) => (
                                 <div key={f.key}>
                                   <span className="block font-black uppercase text-[9px] text-[--text-secondary]">{f.label}</span>
-                                  <span className="text-[--text-primary]">{f.render ? f.render(row) : (row[f.key] || '-')}</span>
+                                  <span className="text-[--text-primary] font-medium">{f.render ? f.render(row) : (row[f.key] || '-')}</span>
                                 </div>
                               ))}
                             </div>
@@ -418,6 +475,8 @@ export default function DataSectionPage({ config }) {
           open={modalOpen}
           onClose={() => setModalOpen(false)}
           vertical={activeVertical}
+          subVerticals={subVerticals}
+          defaultSubVerticalId={subVerticalId}
           agents={agents}
           initialMode={modalMode}
           onSaved={fetchRecords}

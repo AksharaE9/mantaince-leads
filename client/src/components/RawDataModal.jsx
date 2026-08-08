@@ -15,12 +15,29 @@ const RAW_DATA_ENDPOINTS = {
 };
 
 const emptyForm = {
-  date: '', employeeName: '', businessType: '', businessName: '', area: '', city: '',
-  phoneNumber: '', address: '', appointmentDate: '', appointmentTimings: '', remarks: '',
+  date: '',
+  employeeName: '',
+  subVerticalId: '',
+  productService: '',
+  leadName: '',
+  contactPerson: '',
+  phoneNumber: '',
+  alternateNumber: '',
+  city: '',
+  area: '',
+  mapLocation: '',
+  callStatus: '',
+  customerResponse: '',
+  followUpRequired: '',
+  followUpDate: '',
+  followUpTime: '',
+  nextAction: '',
+  remarks: '',
+  converted: '',
 };
 
-const FormField = ({ label, required, children }) => (
-  <div className="flex flex-col gap-1.5">
+const FormField = ({ label, required, children, className = '' }) => (
+  <div className={`flex flex-col gap-1.5 ${className}`}>
     <span className="text-[10px] font-black uppercase text-[--text-secondary]">
       {label}{required && ' *'}
     </span>
@@ -29,24 +46,35 @@ const FormField = ({ label, required, children }) => (
 );
 
 /**
- * "Raw Data" feature entry point — Single Add + Bulk Upload (via the
- * shared CsvImportModal, reconfigured with raw-data endpoints). Vertical
- * is always the `vertical` prop (closure state from LeadsPage), never a
- * field on this form — matching how "Add Lead" is auto-scoped.
+ * "Raw Data" feature entry point — Single Add + Bulk Upload.
  */
-export default function RawDataModal({ open, onClose, vertical, agents = [], onSaved, initialMode = 'single' }) {
+export default function RawDataModal({
+  open,
+  onClose,
+  vertical,
+  subVerticals = [],
+  defaultSubVerticalId = '',
+  agents = [],
+  onSaved,
+  initialMode = 'single'
+}) {
   const [mode, setMode] = useState(initialMode); // 'single' | 'bulk'
   const [form, setForm] = useState(emptyForm);
   const [assignedTo, setAssignedTo] = useState('');
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState([]);
 
-  // Re-apply initialMode each time the modal opens — a single mounted
-  // instance is reused for both "Add" (initialMode="single") and "Import"
-  // (initialMode="bulk") toolbar buttons in DataSectionPage.
   useEffect(() => {
-    if (open) setMode(initialMode);
-  }, [open, initialMode]);
+    if (open) {
+      setMode(initialMode);
+      setForm((prev) => ({
+        ...emptyForm,
+        subVerticalId: defaultSubVerticalId || (subVerticals.length === 1 ? subVerticals[0]._id : ''),
+      }));
+      setAssignedTo('');
+      setFieldErrors([]);
+    }
+  }, [open, initialMode, defaultSubVerticalId, subVerticals]);
 
   if (!open) return null;
 
@@ -70,12 +98,13 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
       const res = await axios.post('/api/v1/raw-data', {
         verticalId: vertical._id,
         ...form,
+        subVerticalId: form.subVerticalId || undefined,
         employeeName: selectedAgentName,
       });
       if (res.data.warnings?.length) {
         res.data.warnings.forEach((w) => toast(w.message, { icon: '⚠️' }));
       }
-      toast.success('Raw data record saved.');
+      toast.success('Raw data record saved successfully.');
       onSaved?.();
       handleClose();
     } catch (err) {
@@ -96,9 +125,11 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
         open
         onClose={handleClose}
         vertical={vertical}
+        subVerticals={subVerticals}
+        defaultSubVerticalId={form.subVerticalId || defaultSubVerticalId}
         agents={agents}
         endpoints={RAW_DATA_ENDPOINTS}
-        showSubVertical={false}
+        showSubVertical={subVerticals && subVerticals.length > 0}
         showAssignOperator={false}
         filenamePrefix="raw-data"
         title="Bulk Upload Raw Data"
@@ -109,11 +140,11 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">
-      <div className="glass-panel w-full max-w-2xl p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div className="glass-panel w-full max-w-3xl p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-[--border] pb-3">
           <h3 className="text-lg font-bold text-[--text-primary] flex items-center gap-2">
             <Database className="text-[--accent]" size={20} />
-            <span>Add Raw Data</span>
+            <span>Add Raw Data Record</span>
           </h3>
           <button onClick={handleClose} className="p-1 border border-[--border-strong] rounded text-[--text-secondary] hover:bg-stone-50">
             <X size={16} />
@@ -146,46 +177,106 @@ export default function RawDataModal({ open, onClose, vertical, agents = [], onS
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <FormField label="Date">
               <input type="date" className="w-full" value={form.date} onChange={set('date')} />
             </FormField>
+
             <FormField label="Employee Name">
               <SearchableOperatorSelect agents={agents} value={assignedTo} onChange={setAssignedTo} placeholder="-- Select employee --" />
             </FormField>
-            <FormField label="Business Type">
-              <input type="text" className="w-full" value={form.businessType} onChange={set('businessType')} list="business-type-suggestions" />
-              <datalist id="business-type-suggestions">
-                <option value="Retail" />
-                <option value="Wholesale" />
-                <option value="Manufacturing" />
-                <option value="Services" />
-              </datalist>
+
+            {subVerticals.length > 0 && (
+              <FormField label="Sub-Vertical">
+                <select className="w-full" value={form.subVerticalId} onChange={set('subVerticalId')}>
+                  <option value="">-- Select Sub-Vertical (Optional) --</option>
+                  {subVerticals.map((sv) => (
+                    <option key={sv._id} value={sv._id}>{sv.name}</option>
+                  ))}
+                </select>
+              </FormField>
+            )}
+
+            <FormField label="Product/Service">
+              <input type="text" placeholder="e.g. Software, Consulting" className="w-full" value={form.productService} onChange={set('productService')} />
             </FormField>
-            <FormField label="Business Name">
-              <input type="text" placeholder="-" className="w-full" value={form.businessName} onChange={set('businessName')} />
+
+            <FormField label="Lead Name">
+              <input type="text" placeholder="e.g. Acme Enterprises" className="w-full" value={form.leadName} onChange={set('leadName')} />
             </FormField>
-            <FormField label="Area">
-              <input type="text" placeholder="-" className="w-full" value={form.area} onChange={set('area')} />
+
+            <FormField label="Contact Person">
+              <input type="text" placeholder="e.g. John Doe" className="w-full" value={form.contactPerson} onChange={set('contactPerson')} />
             </FormField>
+
+            <FormField label="Mobile Number" required>
+              <input type="text" required placeholder="Mandatory (Primary Key)" className="w-full font-medium" value={form.phoneNumber} onChange={set('phoneNumber')} />
+            </FormField>
+
+            <FormField label="Alternate Number(If Any)">
+              <input type="text" placeholder="Alternate phone" className="w-full" value={form.alternateNumber} onChange={set('alternateNumber')} />
+            </FormField>
+
             <FormField label="City">
-              <input type="text" placeholder="-" className="w-full" value={form.city} onChange={set('city')} />
+              <input type="text" placeholder="e.g. Bengaluru" className="w-full" value={form.city} onChange={set('city')} />
             </FormField>
-            <FormField label="Phone Number" required>
-              <input type="text" required className="w-full" value={form.phoneNumber} onChange={set('phoneNumber')} />
+
+            <FormField label="Area">
+              <input type="text" placeholder="e.g. Whitefield" className="w-full" value={form.area} onChange={set('area')} />
             </FormField>
-            <FormField label="Address">
-              <input type="text" placeholder="-" className="w-full" value={form.address} onChange={set('address')} />
+
+            <FormField label="Map Location">
+              <input type="text" placeholder="https://maps.google.com/?q=..." className="w-full" value={form.mapLocation} onChange={set('mapLocation')} />
             </FormField>
-            <FormField label="Appointment Date">
-              <input type="date" className="w-full" value={form.appointmentDate} onChange={set('appointmentDate')} />
+
+            <FormField label="Call Status">
+              <select className="w-full" value={form.callStatus} onChange={set('callStatus')}>
+                <option value="">-- Select Status --</option>
+                <option value="Connected">Connected</option>
+                <option value="Busy">Busy</option>
+                <option value="Not Reachable">Not Reachable</option>
+                <option value="Switched Off">Switched Off</option>
+                <option value="Callback Requested">Callback Requested</option>
+                <option value="Wrong Number">Wrong Number</option>
+                <option value="Disconnected">Disconnected</option>
+              </select>
             </FormField>
-            <FormField label="Appointment Timings">
-              <input type="text" placeholder="e.g. 10:00 AM - 11:00 AM" className="w-full" value={form.appointmentTimings} onChange={set('appointmentTimings')} />
+
+            <FormField label="Customer Response">
+              <input type="text" placeholder="Customer's feedback/reaction" className="w-full" value={form.customerResponse} onChange={set('customerResponse')} />
+            </FormField>
+
+            <FormField label="Follow-up Required">
+              <select className="w-full" value={form.followUpRequired} onChange={set('followUpRequired')}>
+                <option value="">-- Select --</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </FormField>
+
+            <FormField label="Follow-up Date">
+              <input type="date" className="w-full" value={form.followUpDate} onChange={set('followUpDate')} />
+            </FormField>
+
+            <FormField label="Follow-up Time">
+              <input type="text" placeholder="e.g. 11:00 AM" className="w-full" value={form.followUpTime} onChange={set('followUpTime')} />
+            </FormField>
+
+            <FormField label="Next Action">
+              <input type="text" placeholder="e.g. Send brochure / Demo" className="w-full" value={form.nextAction} onChange={set('nextAction')} />
+            </FormField>
+
+            <FormField label="Converted (Y/N)">
+              <select className="w-full" value={form.converted} onChange={set('converted')}>
+                <option value="">-- Select --</option>
+                <option value="Y">Y</option>
+                <option value="N">N</option>
+              </select>
             </FormField>
           </div>
+
           <FormField label="Remarks">
-            <textarea className="w-full" rows={3} maxLength={500} value={form.remarks} onChange={set('remarks')} />
+            <textarea className="w-full" rows={3} maxLength={500} placeholder="Additional notes or remarks..." value={form.remarks} onChange={set('remarks')} />
           </FormField>
 
           <div className="flex justify-end gap-2 pt-2 border-t border-[--border]">

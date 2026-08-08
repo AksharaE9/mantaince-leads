@@ -148,10 +148,10 @@ const checkSchemaReady = async () => {
                 WHERE table_name = 'delivery_data' AND column_name = 'delivery_date' AND is_nullable = 'YES'
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'raw_data' AND column_name = 'employee_name_raw'
+                WHERE table_name = 'raw_data' AND column_name = 'sub_vertical_id'
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'raw_data' AND column_name = 'business_name' AND is_nullable = 'YES'
+                WHERE table_name = 'raw_data' AND column_name = 'lead_name'
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.tables
                 WHERE table_name = 'client_error_logs'
@@ -611,26 +611,43 @@ const runMigrations = async () => {
         CREATE TABLE IF NOT EXISTS raw_data (
             id UUID PRIMARY KEY,
             vertical_id UUID NOT NULL REFERENCES verticals(id) ON DELETE CASCADE,
+            sub_vertical_id UUID REFERENCES sub_verticals(id) ON DELETE CASCADE,
             assigned_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
             date DATE,
-            business_type VARCHAR(255),
-            business_name VARCHAR(255) NOT NULL,
-            area VARCHAR(255),
-            city VARCHAR(255),
+            product_service VARCHAR(255),
+            lead_name VARCHAR(255),
+            contact_person VARCHAR(255),
             phone_number VARCHAR(50),
+            alternate_number VARCHAR(50),
+            city VARCHAR(255),
+            area VARCHAR(255),
+            map_location TEXT,
+            call_status VARCHAR(100),
+            customer_response TEXT,
+            follow_up_required VARCHAR(50),
+            follow_up_date DATE,
+            follow_up_time VARCHAR(100),
+            next_action VARCHAR(255),
+            remarks TEXT,
+            converted VARCHAR(50),
+            custom_data JSONB DEFAULT '{}'::jsonb,
+            business_type VARCHAR(255),
+            business_name VARCHAR(255),
             address TEXT,
             appointment_date DATE,
             appointment_timings VARCHAR(100),
-            remarks TEXT,
             source VARCHAR(20) NOT NULL DEFAULT 'single_add',
             csv_batch_id UUID REFERENCES csv_upload_logs(id) ON DELETE SET NULL,
             created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            employee_name_raw VARCHAR(255),
             is_deleted BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_raw_data_vertical ON raw_data(vertical_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_raw_data_subvertical ON raw_data(sub_vertical_id);
         CREATE INDEX IF NOT EXISTS idx_raw_data_phone ON raw_data(vertical_id, phone_number);
+        CREATE INDEX IF NOT EXISTS idx_raw_data_vertical_subvertical_phone ON raw_data(vertical_id, sub_vertical_id, phone_number);
 
         -- Delivery Data: fourth independent bulk-import feature, sibling of
         -- Raw Data (own table, own schema) — not merged into raw_data.
@@ -687,6 +704,25 @@ const runMigrations = async () => {
         -- leave this blank.
         ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS employee_name_raw VARCHAR(255);
         ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS employee_name_raw VARCHAR(255);
+
+        -- New Raw Data Template columns & sub-vertical support
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS sub_vertical_id UUID REFERENCES sub_verticals(id) ON DELETE CASCADE;
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS product_service VARCHAR(255);
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS lead_name VARCHAR(255);
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS contact_person VARCHAR(255);
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS alternate_number VARCHAR(50);
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS map_location TEXT;
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS call_status VARCHAR(100);
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS customer_response TEXT;
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS follow_up_required VARCHAR(50);
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS follow_up_date DATE;
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS follow_up_time VARCHAR(100);
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS next_action VARCHAR(255);
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS converted VARCHAR(50);
+        ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS custom_data JSONB DEFAULT '{}'::jsonb;
+
+        CREATE INDEX IF NOT EXISTS idx_raw_data_subvertical ON raw_data(sub_vertical_id);
+        CREATE INDEX IF NOT EXISTS idx_raw_data_vertical_subvertical_phone ON raw_data(vertical_id, sub_vertical_id, phone_number);
 
         -- Real-time sync change log, polled by clients (replaces SSE — Vercel's
         -- legacy builds/routes @vercel/node config never actually streams

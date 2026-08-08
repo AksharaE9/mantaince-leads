@@ -11,9 +11,13 @@ import { logger } from '../lib/logger.js';
 const BATCH_SIZE = 500;
 
 const RAW_DATA_COLUMNS = [
-    'id', 'vertical_id', 'assigned_user_id', 'date', 'business_type', 'business_name',
-    'area', 'city', 'phone_number', 'address', 'appointment_date', 'appointment_timings',
-    'remarks', 'source', 'csv_batch_id', 'created_by', 'employee_name_raw',
+    'id', 'vertical_id', 'sub_vertical_id', 'assigned_user_id', 'date',
+    'product_service', 'lead_name', 'contact_person', 'phone_number', 'alternate_number',
+    'city', 'area', 'map_location', 'call_status', 'customer_response',
+    'follow_up_required', 'follow_up_date', 'follow_up_time', 'next_action', 'remarks',
+    'converted', 'custom_data', 'business_type', 'business_name', 'address',
+    'appointment_date', 'appointment_timings', 'source', 'csv_batch_id', 'created_by',
+    'employee_name_raw',
 ];
 
 function normalizeRowKeys(rawRow) {
@@ -30,39 +34,78 @@ function normalizeRowKeys(rawRow) {
 const HEADER_KEY_MAP = {
     date: 'date',
     'employee name': 'employeeName',
-    'business type': 'businessType',
-    'business name': 'businessName',
-    area: 'area',
-    city: 'city',
+    'product/service': 'productService',
+    'product service': 'productService',
+    product: 'productService',
+    service: 'productService',
+    'business type': 'productService',
+    'lead name': 'leadName',
+    'business name': 'leadName',
+    'business / person / shop / company name': 'leadName',
+    'contact person': 'contactPerson',
+    'point of contact': 'contactPerson',
+    'mobile number': 'phoneNumber',
     'phone number': 'phoneNumber',
-    address: 'address',
-    adress: 'address', // tolerate the source template's original typo on re-uploads
-    'appointment date': 'appointmentDate',
-    'appointment timings': 'appointmentTimings',
+    'contact number': 'phoneNumber',
+    contact: 'phoneNumber',
+    phone: 'phoneNumber',
+    'alternate number(if any)': 'alternateNumber',
+    'alternate number (if any)': 'alternateNumber',
+    'alternate number': 'alternateNumber',
+    'alt number': 'alternateNumber',
+    city: 'city',
+    area: 'area',
+    'map location': 'mapLocation',
+    'map location link / address': 'mapLocation',
+    'link address': 'mapLocation',
+    address: 'mapLocation',
+    adress: 'mapLocation', // tolerate typo
+    'call status': 'callStatus',
+    status: 'callStatus',
+    'customer response': 'customerResponse',
+    response: 'customerResponse',
+    'follow-up required': 'followUpRequired',
+    'follow up required': 'followUpRequired',
+    'follow-up require': 'followUpRequired',
+    'follow up require (yes/no)': 'followUpRequired',
+    'follow-up date': 'followUpDate',
+    'follow up date': 'followUpDate',
+    'follow-up dates': 'followUpDate',
+    'follow-up time': 'followUpTime',
+    'follow up time': 'followUpTime',
+    'appointment date': 'followUpDate',
+    'appointment timings': 'followUpTime',
+    'next action': 'nextAction',
     remarks: 'remarks',
+    'follow-up remarks': 'remarks',
+    'follow up remarks': 'remarks',
+    'converted (y/n)': 'converted',
+    converted: 'converted',
+    'converted(y/n)': 'converted',
+    conversion: 'converted',
 };
 
 function toSchemaKeyedRow(normalizedRawRow) {
     const row = {};
-    for (const [header, schemaKey] of Object.entries(HEADER_KEY_MAP)) {
-        if (normalizedRawRow[header] !== undefined) row[schemaKey] = normalizedRawRow[header];
+    const extraCustom = {};
+    for (const [rawHeader, rawVal] of Object.entries(normalizedRawRow)) {
+        const schemaKey = HEADER_KEY_MAP[rawHeader];
+        if (schemaKey) {
+            if (row[schemaKey] === undefined) {
+                row[schemaKey] = rawVal;
+            }
+        } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+            extraCustom[rawHeader] = rawVal;
+        }
+    }
+    if (Object.keys(extraCustom).length > 0) {
+        row.customData = extraCustom;
     }
     return row;
 }
 
-// Delegates to the same flexible parser the validator uses (ISO,
-// DD-MM-YYYY/DD-MM-YY, Excel serial numbers) — using a weaker local
-// `new Date(value)` here (the pre-fix behavior) meant a row could pass
-// validation with a date the validator accepted but then silently store
-// null (or a wrong date) at insert time, a real inconsistency this fix
-// closes.
 const toDateOrNull = parseFlexibleDate;
 
-// `failedCountOverride`: see csvProcessor.js's identical helper for why this
-// exists — the final 'done' snapshot passes an `errorsArr` merged with
-// non-blocking warnings so cache readers see the same report the DB has,
-// and the real failed-row count must be passed explicitly so it isn't
-// miscounted as `errors.length + warnings.length`.
 async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, successCount, errorsArr, duplicateCount, failedCountOverride) {
     await cacheSet(`csv_progress:${batchId}`, {
         id: batchId,
@@ -79,15 +122,10 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
 }
 
 /**
- * Raw Data queue processor — the Raw Data equivalent of
- * jobs/csvProcessor.js#processCsvJob. Deliberately a parallel module rather
- * than a fork of that one: it composes the same generic, already-tested
- * pieces (parseUploadBuffer, bulkInsert) instead of forcing raw_data through
- * cost_conversions-shaped code, so the working Leads/Follow-ups pipeline is
- * never touched by this feature.
+ * Raw Data queue processor — processes bulk upload for Raw Data.
  */
 export const processRawDataJob = async (job) => {
-    const { batchId, fileBufferBase64, verticalId, uploadedBy, fileExt = '.csv' } = job.data;
+    const { batchId, fileBufferBase64, verticalId, subVerticalId, uploadedBy, fileExt = '.csv' } = job.data;
 
     let totalRows = 0;
     let successCount = 0;
@@ -113,7 +151,6 @@ export const processRawDataJob = async (job) => {
             return;
         }
 
-        // Fetched once per batch, not per row — same discipline as csvProcessor.js.
         const [agents, knownBusinessTypes] = await Promise.all([
             getAssignableAgents(verticalId),
             getKnownBusinessTypes(verticalId),
@@ -123,17 +160,31 @@ export const processRawDataJob = async (job) => {
         const normalizedRows = rows.map(r => toSchemaKeyedRow(normalizeRowKeys(r)));
         const filePhones = normalizedRows.map(r => (r.phoneNumber || '').replace(/[^\d+]/g, '')).filter(Boolean);
         const uniquePhones = [...new Set(filePhones)];
-        let existingPhones = [];
+        
+        const conflictLabelByPhone = new Map();
         if (uniquePhones.length > 0) {
-            const existingRes = await query(
-                `SELECT phone_number FROM raw_data
-                 WHERE vertical_id = $1 AND is_deleted = false
-                   AND phone_number = ANY($2)`,
-                [verticalId, uniquePhones]
-            );
-            existingPhones = existingRes.rows.map(r => r.phone_number.replace(/[^\d+]/g, ''));
+            let existingRes;
+            if (subVerticalId) {
+                existingRes = await query(
+                    `SELECT phone_number, lead_name, business_name, contact_person FROM raw_data
+                     WHERE vertical_id = $1 AND sub_vertical_id = $2 AND is_deleted = false
+                       AND phone_number = ANY($3)`,
+                    [verticalId, subVerticalId, uniquePhones]
+                );
+            } else {
+                existingRes = await query(
+                    `SELECT phone_number, lead_name, business_name, contact_person FROM raw_data
+                     WHERE vertical_id = $1 AND is_deleted = false
+                       AND phone_number = ANY($2)`,
+                    [verticalId, uniquePhones]
+                );
+            }
+            for (const r of existingRes.rows) {
+                const p = r.phone_number.replace(/[^\d+]/g, '');
+                conflictLabelByPhone.set(p, r.lead_name || r.business_name || r.contact_person || 'existing record');
+            }
         }
-        const phoneSet = new Set(existingPhones);
+        const phoneSet = new Set(conflictLabelByPhone.keys());
         const rowOutcomes = [];
 
         const validRows = [];
@@ -154,27 +205,50 @@ export const processRawDataJob = async (job) => {
             const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
             if (phoneSet.has(phone)) {
                 duplicateCount++;
-                const reason = 'Duplicate: contact number already exists';
+                const conflict = conflictLabelByPhone.get(phone) || (row.leadName || row.businessName || 'prior row in file');
+                const reason = `Duplicate: mobile number already exists (conflicts with "${conflict}")`;
                 errors.push({ row: rowNum, code: ErrorCodes.DUPLICATE_PHONE, field: 'phoneNumber', reason, originalRow: rawRow });
                 rowOutcomes.push({ row: rowNum, status: 'duplicate', reason });
                 return;
             }
             phoneSet.add(phone);
+            conflictLabelByPhone.set(phone, row.leadName || row.businessName || row.contactPerson || `Row ${rowNum}`);
+
+            const parsedDate = toDateOrNull(row.date);
+            const parsedFollowUpDate = toDateOrNull(row.followUpDate || row.appointmentDate);
+            const leadNameVal = row.leadName || row.businessName || null;
+            const prodServiceVal = row.productService || row.businessType || null;
+            const mapLocVal = row.mapLocation || row.address || null;
+            const followUpTimeVal = row.followUpTime || row.appointmentTimings || null;
 
             validRows.push({
                 id: crypto.randomUUID(),
                 vertical_id: verticalId,
+                sub_vertical_id: subVerticalId || null,
                 assigned_user_id: assignedUserId,
-                date: toDateOrNull(row.date),
-                business_type: row.businessType || null,
-                business_name: row.businessName || null,
-                area: row.area || null,
-                city: row.city || null,
+                date: parsedDate,
+                product_service: prodServiceVal,
+                lead_name: leadNameVal,
+                contact_person: row.contactPerson || null,
                 phone_number: phone,
-                address: row.address || null,
-                appointment_date: toDateOrNull(row.appointmentDate),
-                appointment_timings: row.appointmentTimings || null,
-                remarks: row.remarks || null,
+                alternate_number: row.alternateNumber ? String(row.alternateNumber).trim() : null,
+                city: row.city ? String(row.city).trim() : null,
+                area: row.area ? String(row.area).trim() : null,
+                map_location: mapLocVal,
+                call_status: row.callStatus ? String(row.callStatus).trim() : null,
+                customer_response: row.customerResponse ? String(row.customerResponse).trim() : null,
+                follow_up_required: row.followUpRequired ? String(row.followUpRequired).trim() : null,
+                follow_up_date: parsedFollowUpDate,
+                follow_up_time: followUpTimeVal,
+                next_action: row.nextAction ? String(row.nextAction).trim() : null,
+                remarks: row.remarks ? String(row.remarks).trim() : null,
+                converted: row.converted ? String(row.converted).trim() : null,
+                custom_data: row.customData ? JSON.stringify(row.customData) : '{}',
+                business_type: prodServiceVal,
+                business_name: leadNameVal,
+                address: mapLocVal,
+                appointment_date: parsedFollowUpDate,
+                appointment_timings: followUpTimeVal,
                 source: 'bulk_upload',
                 csv_batch_id: batchId,
                 created_by: uploadedBy,
@@ -193,7 +267,7 @@ export const processRawDataJob = async (job) => {
                 for (const r of chunk) {
                     rowOutcomes.push({ row: r.csvRowNum, status: 'success', id: r.id });
                 }
-            } catch (chunkErr) {
+            } catch {
                 // Fall back row-by-row so one bad row never sinks the whole chunk.
                 for (const r of chunk) {
                     try {
@@ -203,13 +277,13 @@ export const processRawDataJob = async (job) => {
                     } catch (singleErr) {
                         const rawErr = singleErr.cause || singleErr;
                         const isDup = rawErr.code === '23505';
-                        const reason = isDup ? 'Duplicate: contact number already exists' : rawErr.message;
+                        const reason = isDup ? 'Duplicate: mobile number already exists' : rawErr.message;
                         if (isDup) {
                             duplicateCount++;
                             errors.push({ row: r.csvRowNum, code: ErrorCodes.DUPLICATE_PHONE, field: 'phoneNumber', reason, originalRow: r.originalRow });
                             rowOutcomes.push({ row: r.csvRowNum, status: 'duplicate', reason });
                         } else {
-                            errors.push({ row: r.csvRowNum, code: ErrorCodes.DB_CONSTRAINT, reason: `Insert failed for ${r.business_name}: ${reason}`, originalRow: r.originalRow });
+                            errors.push({ row: r.csvRowNum, code: ErrorCodes.DB_CONSTRAINT, reason: `Insert failed for ${r.lead_name || r.phone_number}: ${reason}`, originalRow: r.originalRow });
                             rowOutcomes.push({ row: r.csvRowNum, status: 'failed', reason });
                         }
                     }
@@ -224,13 +298,7 @@ export const processRawDataJob = async (job) => {
         const outcomeTotal = outcomeSuccess + outcomeDuplicate + outcomeFailed;
 
         console.log(`[RawData Processor] Batch final report: total=${totalRows}, outcomes=${outcomeTotal} (success=${outcomeSuccess}, duplicates=${outcomeDuplicate}, failed=${outcomeFailed})`);
-        if (outcomeTotal !== totalRows) {
-            console.error(`[RawData Processor] MISMATCH warning: totalRows (${totalRows}) !== outcomeTotal (${outcomeTotal})`);
-        }
 
-        // Cached snapshot matches the persisted DB report exactly (merged
-        // errors+warnings); real failed-row count passed explicitly so
-        // warnings never inflate it — see emitProgress's comment above.
         const persistedEntries = [...errors, ...warnings.map(w => ({ ...w, warning: true }))];
         await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, successCount, persistedEntries, duplicateCount, outcomeFailed);
         await query(`

@@ -7,48 +7,34 @@ import { resolveEmployeeName as resolveEmployeeNameShared } from '../utils/emplo
  * for the downloadable template (CSV + XLSX) AND the row validator, exactly
  * like server/src/services/leadImportSchema.js for the Leads/Positives
  * import. Fields, order, and column headers come directly from the
- * template file the user supplied.
+ * template file the user supplied in the Excel photos.
  *
- * Product decisions made explicitly (not silently):
- * - The source file spells column H "Adress" (missing a 'd') and column E
- *   "Area " (trailing space). The internal schema `key` is clean either
- *   way ("address" / "area"); for the *label* shown to users, this is a
- *   brand-new dynamically-generated template (not a legacy file field
- *   staff have memorized), so we correct both: label is "Address" and
- *   "Area" (trimmed). If field staff push back because they specifically
- *   recognize "Adress", flip DISPLAY_ADRESS_AS_TYPO below to true.
- * - Business Type has no canonical list anywhere in this codebase (verified
- *   against field_configs and the DB) — treated as free text. New values
- *   are accepted and returned as a `warnings` entry (not rejected) so an
- *   admin notices them and can decide whether to formalize an enum later.
- * - "Appointment Date before Date" is downgraded to a *warning*, not a hard
- *   reject — there's no existing business-rule precedent in this app to
- *   confirm a hard block is correct, and the prompt's own fallback for an
- *   unconfirmed rule is to warn rather than block.
- * - Phone-number-only-mandatory policy (see CLAUDE.md / diagnosis of the
- *   55-row Delivery Data upload failure): Date and Business Name used to be
- *   `required: true` here. A real bulk upload with valid data (dash-format
- *   dates the old parser didn't handle, and business names that were
- *   present) was rejected wholesale by this over-strict rule combined with
- *   a parser gap — not by genuinely bad source data. `phoneNumber` is now
- *   the only `required: true` field in this schema; every other field
- *   (including Date and Business Name) is optional and, if present but
- *   unparseable/invalid, degrades to a warning rather than a hard reject.
+ * Mandatory policy:
+ * - `phoneNumber` (Mobile Number) is the ONLY `required: true` field in this schema;
+ *   it acts as the primary key for duplicate detection.
+ * - Every other field (including Date, Lead Name, etc.) is optional and, if present
+ *   but unparseable/invalid, degrades to a warning rather than a hard reject.
  */
-const DISPLAY_ADRESS_AS_TYPO = false;
 
 export const RAW_DATA_FIELDS = [
     { key: 'date', label: 'Date', csvHeader: 'Date', type: 'date', required: false },
     { key: 'employeeName', label: 'Employee Name', csvHeader: 'Employee Name', type: 'string', required: false, resolvesToUser: true },
-    { key: 'businessType', label: 'Business Type', csvHeader: 'Business Type', type: 'string', required: false },
-    { key: 'businessName', label: 'Business Name', csvHeader: 'Business Name', type: 'string', required: false, maxLength: 255 },
-    { key: 'area', label: 'Area', csvHeader: 'Area', type: 'string', required: false },
+    { key: 'productService', label: 'Product/Service', csvHeader: 'Product/Service', type: 'string', required: false },
+    { key: 'leadName', label: 'Lead Name', csvHeader: 'Lead Name', type: 'string', required: false, maxLength: 255 },
+    { key: 'contactPerson', label: 'Contact Person', csvHeader: 'Contact Person', type: 'string', required: false, maxLength: 255 },
+    { key: 'phoneNumber', label: 'Mobile Number', csvHeader: 'Mobile Number', type: 'phone', required: true, unique: true },
+    { key: 'alternateNumber', label: 'Alternate Number(If Any)', csvHeader: 'Alternate Number(If Any)', type: 'string', required: false },
     { key: 'city', label: 'City', csvHeader: 'City', type: 'string', required: false },
-    { key: 'phoneNumber', label: 'Phone Number', csvHeader: 'Phone Number', type: 'phone', required: true },
-    { key: 'address', label: DISPLAY_ADRESS_AS_TYPO ? 'Adress' : 'Address', csvHeader: DISPLAY_ADRESS_AS_TYPO ? 'Adress' : 'Address', type: 'string', required: false },
-    { key: 'appointmentDate', label: 'Appointment Date', csvHeader: 'Appointment Date', type: 'date', required: false },
-    { key: 'appointmentTimings', label: 'Appointment Timings', csvHeader: 'Appointment Timings', type: 'string', required: false },
+    { key: 'area', label: 'Area', csvHeader: 'Area', type: 'string', required: false },
+    { key: 'mapLocation', label: 'Map Location', csvHeader: 'Map Location', type: 'string', required: false },
+    { key: 'callStatus', label: 'Call Status', csvHeader: 'Call Status', type: 'string', required: false },
+    { key: 'customerResponse', label: 'Customer Response', csvHeader: 'Customer Response', type: 'string', required: false },
+    { key: 'followUpRequired', label: 'Follow-up Required', csvHeader: 'Follow-up Required', type: 'enum', options: ['Yes', 'No'], required: false },
+    { key: 'followUpDate', label: 'Follow-up Date', csvHeader: 'Follow-up Date', type: 'date', required: false },
+    { key: 'followUpTime', label: 'Follow-up Time', csvHeader: 'Follow-up Time', type: 'string', required: false },
+    { key: 'nextAction', label: 'Next Action', csvHeader: 'Next Action', type: 'string', required: false },
     { key: 'remarks', label: 'Remarks', csvHeader: 'Remarks', type: 'string', required: false, maxLength: 500 },
+    { key: 'converted', label: 'Converted (Y/N)', csvHeader: 'Converted (Y/N)', type: 'enum', options: ['Y', 'N', 'Yes', 'No'], required: false },
 ];
 
 export async function getAssignableAgents(verticalId) {
@@ -61,33 +47,23 @@ export async function getAssignableAgents(verticalId) {
 
 export async function getKnownBusinessTypes(verticalId) {
     const res = await query(
-        `SELECT DISTINCT business_type FROM raw_data
-         WHERE vertical_id = $1 AND is_deleted = false AND business_type IS NOT NULL AND business_type <> ''`,
+        `SELECT DISTINCT COALESCE(product_service, business_type) AS val FROM raw_data
+         WHERE vertical_id = $1 AND is_deleted = false AND (product_service IS NOT NULL OR business_type IS NOT NULL)`,
         [verticalId]
     );
-    return new Set(res.rows.map(r => r.business_type.toLowerCase()));
+    return new Set(res.rows.map(r => (r.val || '').toLowerCase()).filter(Boolean));
 }
 
 /**
  * Resolves a free-text employee name to zero or one user. Delegates to the
  * shared matcher (server/src/utils/employeeMatch.js) so Raw Data, Delivery
  * Data, and COS/Positives bulk upload can never disagree about what counts
- * as a confident match. Re-exported under this module's original name so
- * every existing import site keeps working unchanged.
- *
- * Phone-number-only-mandatory policy: this NEVER returns a hard rejection
- * anymore — an unresolved/ambiguous/blank name comes back as
- * `{ userId: null, warning }` and the row proceeds unassigned, not blocked.
+ * as a confident match.
  */
 export const resolveEmployeeName = resolveEmployeeNameShared;
 
 const PHONE_REGEX = /^\+?\d{7,15}$/;
 
-// Excel's native serial-date encoding is days since 1899-12-30 (the
-// standard correction that absorbs Excel's fictitious Feb-29-1900 leap
-// day). Bounds chosen so a bare typed year ("2026") or a small quantity
-// ("12") can never be misread as a serial date — real-world spreadsheet
-// serials for 1928-2064 land in [10000, 60000).
 const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
 const MS_PER_DAY = 86_400_000;
 
@@ -105,12 +81,7 @@ export function parseFlexibleDate(value) {
         return Number.isNaN(d.getTime()) ? null : d;
     }
 
-    // dd/mm/yyyy or dd-mm-yyyy (4-digit year) — the rest of this app's date
-    // filters use ISO inputs; for ambiguous separated dates we assume
-    // DD-MM-YYYY (the locale field staff in this app's existing forms and
-    // uploaded files use), not MM-DD-YYYY. Both '/' and '-' separators are
-    // accepted — real uploads use both interchangeably (see the "23-06-26" /
-    // "26-06-2026" real-world example that broke the old slash-only parser).
+    // dd/mm/yyyy or dd-mm-yyyy (4-digit year)
     const dmy4 = /^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$/.exec(str);
     if (dmy4) {
         const day = +dmy4[1], month = +dmy4[2], year = +dmy4[3];
@@ -120,10 +91,7 @@ export function parseFlexibleDate(value) {
         }
     }
 
-    // dd/mm/yy or dd-mm-yy (2-digit year) — this is the exact format the
-    // real failed 55-row Delivery Data upload used for its "Date" column
-    // ("23-06-26"). 2-digit years are windowed 1970-2069 (standard
-    // POSIX/spreadsheet convention: <70 => 20xx, >=70 => 19xx).
+    // dd/mm/yy or dd-mm-yy (2-digit year)
     const dmy2 = /^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})$/.exec(str);
     if (dmy2) {
         const day = +dmy2[1], month = +dmy2[2], yy = +dmy2[3];
@@ -134,9 +102,7 @@ export function parseFlexibleDate(value) {
         }
     }
 
-    // Excel serial-date number — happens when a CSV export (or an .xlsx
-    // cell exceljs doesn't recognize as a Date-typed cell) carries the raw
-    // numeric day-count instead of a formatted date string.
+    // Excel serial-date number
     if (/^\d+(\.\d+)?$/.test(str)) {
         const serial = parseFloat(str);
         if (serial >= 10000 && serial < 60000) {
@@ -150,14 +116,10 @@ export function parseFlexibleDate(value) {
 }
 
 /**
- * Validates one normalized row (schema key -> raw value) against
- * RAW_DATA_FIELDS. `agents` and `knownBusinessTypes` are fetched once per
- * batch by the caller (never per-row) and passed in — this function is
- * pure otherwise, so it's unit-testable without a DB.
- *
- * Returns { errors: [{field,message}], warnings: [{field,message}], assignedUserId }.
+ * Validates one normalized row (schema key -> raw value) against RAW_DATA_FIELDS.
+ * Returns { errors: [{field,message}], warnings: [{field,message}], assignedUserId, employeeNameRaw }.
  */
-export function validateRawDataRow(row, { agents, knownBusinessTypes }) {
+export function validateRawDataRow(row, { agents, knownBusinessTypes } = {}) {
     const errors = [];
     const warnings = [];
 
@@ -166,10 +128,7 @@ export function validateRawDataRow(row, { agents, knownBusinessTypes }) {
         const raw = row[field.key];
         const value = raw === undefined || raw === null ? '' : String(raw).trim();
 
-        // Phone-number-only-mandatory policy: `required` today only ever
-        // means `phoneNumber` (see RAW_DATA_FIELDS above) — kept generic
-        // here rather than hardcoding the key, so a future required field
-        // doesn't need this function edited too.
+        // Phone-number-only-mandatory policy: `phoneNumber` is required
         if (field.required && !value) {
             errors.push({ field: field.key, message: `${field.label} is required` });
             continue;
@@ -179,9 +138,7 @@ export function validateRawDataRow(row, { agents, knownBusinessTypes }) {
         if (field.type === 'phone' && !PHONE_REGEX.test(value.replace(/[^\d+]/g, ''))) {
             errors.push({ field: field.key, message: `${field.label} is not a valid phone number` });
         }
-        // A present-but-unparseable date is a warning, not a hard reject —
-        // the row still inserts with that field left null (see file header
-        // "phone-number-only-mandatory policy" note).
+        // A present-but-unparseable date is a warning, not a hard reject
         if (field.type === 'date' && !parseFlexibleDate(value)) {
             warnings.push({ field: field.key, message: `${field.label} ("${value}") could not be parsed as a date — accepted, left blank` });
         }
@@ -190,9 +147,7 @@ export function validateRawDataRow(row, { agents, knownBusinessTypes }) {
         }
     }
 
-    // Employee Name → assignedUserId, best-effort. Never blocks the row:
-    // unresolved/ambiguous/blank names come back as a warning (or nothing,
-    // if blank) with assignedUserId left null, never an error.
+    // Employee Name → assignedUserId, best-effort
     const nameResult = resolveEmployeeName(row.employeeName, agents);
     const assignedUserId = nameResult.userId;
     const employeeNameRaw = nameResult.rawName || '';
@@ -200,31 +155,35 @@ export function validateRawDataRow(row, { agents, knownBusinessTypes }) {
         warnings.push({ field: 'employeeName', message: nameResult.warning });
     }
 
-    // Business Type: accept-and-flag new values (no hard-reject — no canonical list exists)
-    const businessType = (row.businessType || '').trim();
-    if (businessType && knownBusinessTypes && !knownBusinessTypes.has(businessType.toLowerCase())) {
-        warnings.push({ field: 'businessType', message: `"${businessType}" is a new Business Type not seen before — accepted, flagged for review` });
+    // Product/Service / Business Type warning for unknown options (non-blocking)
+    const productService = (row.productService || row.businessType || '').trim();
+    if (productService && knownBusinessTypes && knownBusinessTypes.size > 0 && !knownBusinessTypes.has(productService.toLowerCase())) {
+        warnings.push({ field: 'productService', message: `"${productService}" is a new Product/Service not seen before — accepted, flagged for review` });
     }
 
-    // Date vs Appointment Date — warning only, not a hard block (see file header decision)
+    // Follow-up Date vs Visit Date validation
     const dateVal = parseFlexibleDate(row.date);
-    const apptVal = parseFlexibleDate(row.appointmentDate);
-    if (dateVal && apptVal && apptVal < dateVal) {
-        warnings.push({ field: 'appointmentDate', message: 'Appointment Date is earlier than the visit Date — accepted, please verify' });
+    const followUpVal = parseFlexibleDate(row.followUpDate || row.appointmentDate);
+    if (dateVal && followUpVal && followUpVal < dateVal) {
+        warnings.push({ field: 'followUpDate', message: 'Follow-up Date is earlier than the record Date — accepted, please verify' });
     }
 
     return { errors, warnings, assignedUserId, employeeNameRaw };
 }
 
 // ── List/export filter & sort helpers ──────────────────────────────────────
-// Shared by the GET /raw-data list endpoint and the GET /raw-data/export/csv
-// endpoint (server/src/controllers/rawData.js), so a query string can never
-// be filtered differently by the two — one builder, two callers.
 
 const RAW_DATA_SORT_COLUMNS = {
     date: 'r.date',
-    businessName: 'r.business_name',
+    leadName: 'COALESCE(r.lead_name, r.business_name)',
+    businessName: 'COALESCE(r.lead_name, r.business_name)',
+    contactPerson: 'r.contact_person',
+    phoneNumber: 'r.phone_number',
     city: 'r.city',
+    area: 'r.area',
+    callStatus: 'r.call_status',
+    followUpDate: 'r.follow_up_date',
+    converted: 'r.converted',
     createdAt: 'r.created_at',
 };
 
@@ -233,22 +192,24 @@ export function resolveRawDataSortColumn(sortBy) {
 }
 
 /**
- * Builds additional WHERE clauses/params for raw_data queries, on top of the
- * mandatory vertical_id/is_deleted clauses the caller already owns.
- * `startIdx` is the next free $N placeholder index.
+ * Builds additional WHERE clauses/params for raw_data queries.
  */
 export function buildRawDataFilters(queryParams, startIdx) {
-    const { assignedUserId, search, dateFrom, dateTo, businessType, city } = queryParams;
+    const { subVerticalId, assignedUserId, search, dateFrom, dateTo, productService, businessType, city, area, callStatus, converted } = queryParams;
     const clauses = [];
     const params = [];
     let idx = startIdx;
 
+    if (subVerticalId && isValidUUID(subVerticalId)) {
+        clauses.push(`r.sub_vertical_id = $${idx++}`);
+        params.push(subVerticalId);
+    }
     if (assignedUserId && isValidUUID(assignedUserId)) {
         clauses.push(`r.assigned_user_id = $${idx++}`);
         params.push(assignedUserId);
     }
     if (search && search.trim().length >= 2) {
-        clauses.push(`(r.business_name ILIKE $${idx} OR r.phone_number ILIKE $${idx})`);
+        clauses.push(`(r.lead_name ILIKE $${idx} OR r.business_name ILIKE $${idx} OR r.contact_person ILIKE $${idx} OR r.phone_number ILIKE $${idx} OR r.alternate_number ILIKE $${idx})`);
         params.push(`%${search.trim()}%`);
         idx++;
     }
@@ -260,13 +221,27 @@ export function buildRawDataFilters(queryParams, startIdx) {
         clauses.push(`r.date <= $${idx++}`);
         params.push(dateTo);
     }
-    if (businessType && businessType.trim()) {
-        clauses.push(`r.business_type ILIKE $${idx++}`);
-        params.push(`%${businessType.trim()}%`);
+    const prod = productService || businessType;
+    if (prod && prod.trim()) {
+        clauses.push(`(r.product_service ILIKE $${idx} OR r.business_type ILIKE $${idx})`);
+        params.push(`%${prod.trim()}%`);
+        idx++;
     }
     if (city && city.trim()) {
         clauses.push(`r.city ILIKE $${idx++}`);
         params.push(`%${city.trim()}%`);
+    }
+    if (area && area.trim()) {
+        clauses.push(`r.area ILIKE $${idx++}`);
+        params.push(`%${area.trim()}%`);
+    }
+    if (callStatus && callStatus.trim()) {
+        clauses.push(`r.call_status ILIKE $${idx++}`);
+        params.push(`%${callStatus.trim()}%`);
+    }
+    if (converted && converted.trim()) {
+        clauses.push(`r.converted ILIKE $${idx++}`);
+        params.push(`%${converted.trim()}%`);
     }
 
     return { clauses, params, nextIdx: idx };
