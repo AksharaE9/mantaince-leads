@@ -29,12 +29,65 @@ const sanitizeCsvValue = (val) => {
     return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
 };
 
+let rawDataSchemaReady = false;
+async function ensureRawDataSchema() {
+    if (rawDataSchemaReady) return;
+    try {
+        await query(`
+            CREATE TABLE IF NOT EXISTS raw_data (
+                id UUID PRIMARY KEY,
+                vertical_id UUID NOT NULL REFERENCES verticals(id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS sub_vertical_id UUID REFERENCES sub_verticals(id) ON DELETE CASCADE;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS assigned_user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS date DATE;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS product_service VARCHAR(255);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS lead_name VARCHAR(255);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS contact_person VARCHAR(255);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS alternate_number VARCHAR(50);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS city VARCHAR(255);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS area VARCHAR(255);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS map_location TEXT;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS call_status VARCHAR(100);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS customer_response TEXT;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS follow_up_required VARCHAR(50);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS follow_up_date DATE;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS follow_up_time VARCHAR(100);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS next_action VARCHAR(255);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS remarks TEXT;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS converted VARCHAR(50);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS custom_data JSONB DEFAULT '{}'::jsonb;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS business_type VARCHAR(255);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS business_name VARCHAR(255);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS address TEXT;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS appointment_date DATE;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS appointment_timings VARCHAR(100);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'single_add';
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS csv_batch_id UUID;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id) ON DELETE SET NULL;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS employee_name_raw VARCHAR(255);
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+            ALTER TABLE raw_data ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+            CREATE INDEX IF NOT EXISTS idx_raw_data_subvertical ON raw_data(sub_vertical_id);
+            CREATE INDEX IF NOT EXISTS idx_raw_data_phone ON raw_data(vertical_id, phone_number);
+            CREATE INDEX IF NOT EXISTS idx_raw_data_vertical_subvertical_phone ON raw_data(vertical_id, sub_vertical_id, phone_number);
+        `);
+        rawDataSchemaReady = true;
+    } catch (err) {
+        console.error('⚠️ ensureRawDataSchema error:', err.message);
+    }
+}
+
 /**
  * GET /raw-data
  */
 export const getRawData = async (req, res) => {
     const { verticalId, page = 1, limit = 25, sortBy, sortDir } = req.query;
     try {
+        await ensureRawDataSchema();
         if (!verticalId || !isValidUUID(verticalId)) {
             return res.status(200).json({ success: true, data: [], meta: { total: 0, totalPages: 0 } });
         }

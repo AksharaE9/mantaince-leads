@@ -213,13 +213,13 @@ export function buildRawDataFilters(queryParams, startIdx) {
         params.push(`%${search.trim()}%`);
         idx++;
     }
-    if (dateFrom) {
+    if (dateFrom && String(dateFrom).trim()) {
         clauses.push(`r.date >= $${idx++}`);
-        params.push(dateFrom);
+        params.push(String(dateFrom).trim());
     }
-    if (dateTo) {
+    if (dateTo && String(dateTo).trim()) {
         clauses.push(`r.date <= $${idx++}`);
-        params.push(dateTo);
+        params.push(String(dateTo).trim());
     }
     const prod = productService || businessType;
     if (prod && prod.trim()) {
