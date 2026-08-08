@@ -4,10 +4,13 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import { PORT, CLIENT_URL, MAX_CSV_FILE_SIZE_MB } from './config/env.js';
-import pool, { connectDB } from './config/db.js';
+import pool, { connectDB, ensureDbReady } from './config/db.js';
 import performanceMonitor from './middleware/performance.js';
 import { timingMiddleware } from './middleware/timing.js';
 import { sendControllerError } from './utils/dbErrors.js';
+
+// Auto-run schema readiness on startup (safe & idempotent)
+ensureDbReady().catch((err) => console.error('⚠️ DB startup check error:', err.message));
 
 // Route imports
 import authRouter from './routes/auth.js';

@@ -82,7 +82,28 @@ pool.on('error', (err) => {
 
 import { timingContext } from '../middleware/timing.js';
 
+let dbInitPromise = null;
+export const ensureDbReady = async () => {
+    if (!dbInitPromise) {
+        dbInitPromise = (async () => {
+            try {
+                const isReady = await checkSchemaReady();
+                if (!isReady || process.env.FORCE_MIGRATIONS === 'true') {
+                    await runMigrations();
+                }
+            } catch (err) {
+                console.error('⚠️ DB migration check error:', err.message);
+                dbInitPromise = null;
+            }
+        })();
+    }
+    return dbInitPromise;
+};
+
 export const query = async (text, params) => {
+    if (!dbInitPromise) {
+        await ensureDbReady();
+    }
     const req = timingContext.getStore();
     if (req?.timer) req.timer.start('db');
     try {
