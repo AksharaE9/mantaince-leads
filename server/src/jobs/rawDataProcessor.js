@@ -85,11 +85,68 @@ const HEADER_KEY_MAP = {
     conversion: 'converted',
 };
 
+const CANONICAL_HEADER_MAP = {
+    date: 'date',
+    employeename: 'employeeName',
+    agentname: 'employeeName',
+    employee: 'employeeName',
+    agent: 'employeeName',
+    productservice: 'productService',
+    product: 'productService',
+    service: 'productService',
+    businesstype: 'productService',
+    leadname: 'leadName',
+    businessname: 'leadName',
+    companyname: 'leadName',
+    name: 'leadName',
+    contactperson: 'contactPerson',
+    pointofcontact: 'contactPerson',
+    mobilenumber: 'phoneNumber',
+    phonenumber: 'phoneNumber',
+    contactnumber: 'phoneNumber',
+    mobile: 'phoneNumber',
+    phone: 'phoneNumber',
+    contact: 'phoneNumber',
+    alternatenumberifany: 'alternateNumber',
+    alternatenumber: 'alternateNumber',
+    altnumber: 'alternateNumber',
+    secondarynumber: 'alternateNumber',
+    city: 'city',
+    area: 'area',
+    maplocation: 'mapLocation',
+    maplocationlinkaddress: 'mapLocation',
+    location: 'mapLocation',
+    address: 'mapLocation',
+    adress: 'mapLocation',
+    callstatus: 'callStatus',
+    status: 'callStatus',
+    customerresponse: 'customerResponse',
+    response: 'customerResponse',
+    feedback: 'customerResponse',
+    followuprequired: 'followUpRequired',
+    followuprequire: 'followUpRequired',
+    followup: 'followUpRequired',
+    followupdate: 'followUpDate',
+    nextfollowupdate: 'followUpDate',
+    followuptime: 'followUpTime',
+    appointmentdate: 'followUpDate',
+    appointmenttimings: 'followUpTime',
+    nextaction: 'nextAction',
+    action: 'nextAction',
+    remarks: 'remarks',
+    remark: 'remarks',
+    notes: 'remarks',
+    convertedyn: 'converted',
+    converted: 'converted',
+    conversion: 'converted',
+};
+
 function toSchemaKeyedRow(normalizedRawRow) {
     const row = {};
     const extraCustom = {};
     for (const [rawHeader, rawVal] of Object.entries(normalizedRawRow)) {
-        const schemaKey = HEADER_KEY_MAP[rawHeader];
+        const canonical = rawHeader.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const schemaKey = HEADER_KEY_MAP[rawHeader] || CANONICAL_HEADER_MAP[canonical];
         if (schemaKey) {
             if (row[schemaKey] === undefined) {
                 row[schemaKey] = rawVal;

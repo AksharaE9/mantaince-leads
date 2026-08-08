@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Upload, X, CheckCircle2, FileSpreadsheet } from 'lucide-react';
+import { Download, Upload, X, CheckCircle2, FileSpreadsheet, Eye } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import axios from '../api/axios.js';
@@ -34,13 +34,6 @@ const FilterInput = ({ label, children }) => (
  * download (CSV + XLSX with dropdowns), client-side preview validation
  * against the server's shared schema, upload + progress polling, and a
  * structured result + downloadable error report.
- *
- * Used by both the Leads page (leadTypeOptions: CALL/FIELD) and the
- * Positives & Follow-ups page (leadType: 'POSITIVE', fixed) — previously
- * two independent copy-pasted implementations that had drifted (one had
- * the multipart Content-Type bug, neither had xlsx support or preview).
- * Fixing/extending this in one place is the point: any future import
- * feature gets all of this for free by mounting the same component.
  */
 export default function CsvImportModal({
   open,
@@ -155,7 +148,7 @@ export default function CsvImportModal({
       toast.error('Please select a file first');
       return;
     }
-    if (showSubVertical && !subVerticalId) {
+    if (showSubVertical && !subVerticalId && subVerticals.length > 0) {
       toast.error('Please select a sub-vertical');
       return;
     }
@@ -166,14 +159,11 @@ export default function CsvImportModal({
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('verticalId', vertical._id);
-    if (showSubVertical) formData.append('subVerticalId', subVerticalId);
+    if (showSubVertical && subVerticalId) formData.append('subVerticalId', subVerticalId);
     formData.append('leadType', currentLeadType);
     if (showAssignOperator && assignTarget) formData.append('assignedTo', assignTarget);
 
     try {
-      // Do NOT set Content-Type manually — axios/the browser must generate
-      // the multipart boundary itself. Forcing it here strips the boundary
-      // param and breaks server-side multer parsing.
       const res = await axios.post(ep.upload(), formData);
       const { batchId } = res.data.data;
       setUploadStatus('processing');
@@ -218,15 +208,6 @@ export default function CsvImportModal({
         }
       }, 2000);
     } catch (err) {
-      // Must set uploadResult here too, not just uploadStatus — the result
-      // panel below only renders when both are set. Without this, a
-      // network/CORS-layer failure (no err.response at all) left the modal
-      // rendering nothing: not the form (status isn't 'idle'), not the
-      // progress view (status isn't 'uploading'/'processing'), not the
-      // result panel (uploadResult was never populated). A blank modal is
-      // arguably worse than no modal — this is the actual "silent failure"
-      // bug behind the reported CORS incident, independent of what caused
-      // that specific request to fail.
       const message = extractErrorMessage(err, 'Failed to upload file');
       setUploadStatus('failed');
       setUploadResult({
@@ -248,9 +229,11 @@ export default function CsvImportModal({
     }
   };
 
+  const isWide = filePreview?.previewMappedRows?.length > 0;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">
-      <div className="glass-panel w-full max-w-lg p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4">
+      <div className={`glass-panel w-full ${isWide ? 'max-w-3xl' : 'max-w-xl'} p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4 max-h-[90vh] overflow-y-auto transition-all`}>
         <div className="flex items-center justify-between border-b border-[--border] pb-3">
           <h3 className="text-lg font-bold text-[--text-primary] flex items-center gap-2">
             <FileSpreadsheet className="text-[--accent]" size={20} />
@@ -264,7 +247,7 @@ export default function CsvImportModal({
         {uploadStatus === 'idle' && (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div
-              className="border-2 border-dashed border-[--border-strong] rounded-xl p-8 text-center bg-stone-50/50 hover:bg-stone-50 transition-all cursor-pointer relative"
+              className="border-2 border-dashed border-[--border-strong] rounded-xl p-6 text-center bg-stone-50/50 hover:bg-stone-50 transition-all cursor-pointer relative"
               onClick={() => document.getElementById('bulk-import-file-picker').click()}
             >
               <input
@@ -291,11 +274,11 @@ export default function CsvImportModal({
                   setSelectedFile(file);
                 }}
               />
-              <Upload className="mx-auto text-[--text-muted] mb-2" size={32} />
+              <Upload className="mx-auto text-[--text-muted] mb-2" size={28} />
               {selectedFile ? (
                 <div>
                   <p className="text-sm font-semibold text-[--accent]">{selectedFile.name}</p>
-                  <p className="text-xs text-[--text-secondary] mt-1">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                  <p className="text-xs text-[--text-secondary] mt-1">{(selectedFile.size / 1024).toFixed(1)} KB (Click to change)</p>
                 </div>
               ) : (
                 <div>
@@ -308,36 +291,77 @@ export default function CsvImportModal({
             {previewLoading && (
               <p className="text-xs text-[--text-secondary]">Checking file against import rules…</p>
             )}
+
             {filePreview && !previewLoading && !filePreview.previewFailed && (
-              <div className={`text-xs rounded-lg border p-3 space-y-1.5 ${filePreview.invalidCount > 0 ? 'border-amber-200 bg-amber-50/50' : 'border-emerald-200 bg-emerald-50/50'}`}>
-                <p className="font-semibold">
-                  {filePreview.validCount} of {filePreview.totalRows} rows look valid
-                  {filePreview.invalidCount > 0 ? `, ${filePreview.invalidCount} have problems.` : '.'}
-                </p>
-                {filePreview.invalidCount > 0 && (
-                  <>
-                    <p className="text-[--text-secondary]">
-                      Invalid rows will be rejected server-side and listed in the error report after upload. You can proceed now and fix them afterward, or cancel and fix the file first.
-                    </p>
-                    <div className="max-h-24 overflow-y-auto font-mono space-y-0.5">
-                      {filePreview.rowErrors.slice(0, 8).map((re, i) => (
-                        <div key={i}>Row {re.row}: {re.errors.map((er) => er.message).join('; ')}</div>
-                      ))}
+              <div className="space-y-2">
+                <div className={`text-xs rounded-lg border p-3 space-y-1.5 ${filePreview.invalidCount > 0 ? 'border-amber-200 bg-amber-50/50' : 'border-emerald-200 bg-emerald-50/50'}`}>
+                  <p className="font-semibold">
+                    {filePreview.validCount} of {filePreview.totalRows} rows look valid
+                    {filePreview.invalidCount > 0 ? `, ${filePreview.invalidCount} have problems.` : '.'}
+                  </p>
+                  {filePreview.invalidCount > 0 && (
+                    <>
+                      <p className="text-[--text-secondary]">
+                        Invalid rows will be rejected server-side and listed in the error report after upload.
+                      </p>
+                      <div className="max-h-20 overflow-y-auto font-mono space-y-0.5 text-[11px]">
+                        {filePreview.rowErrors.slice(0, 5).map((re, i) => (
+                          <div key={i}>Row {re.row}: {re.errors.map((er) => er.message).join('; ')}</div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {filePreview.previewMappedRows?.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center gap-1 text-[10px] font-black uppercase text-[--text-secondary]">
+                      <Eye size={12} className="text-[--accent]" />
+                      <span>Extracted Data Preview (First {filePreview.previewMappedRows.length} Rows):</span>
                     </div>
-                  </>
+                    <div className="overflow-x-auto border border-[--border] rounded-lg max-h-48 bg-stone-50/50 shadow-inner">
+                      <table className="w-full text-[11px] text-left">
+                        <thead>
+                          <tr className="border-b border-[--border] bg-stone-100 text-[10px] uppercase font-bold text-[--text-secondary]">
+                            {filePreview.schemaFields.map((f) => (
+                              <th key={f.key} className="px-2.5 py-1.5 whitespace-nowrap">
+                                {f.label}{f.required && ' *'}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filePreview.previewMappedRows.map((row, idx) => (
+                            <tr key={idx} className="border-b border-[--border] hover:bg-white transition-colors">
+                              {filePreview.schemaFields.map((f) => (
+                                <td key={f.key} className="px-2.5 py-1.5 whitespace-nowrap text-[--text-primary] font-mono text-[11px]">
+                                  {row[f.key] ? (
+                                    <span>{row[f.key]}</span>
+                                  ) : (
+                                    <span className="text-[--text-muted] italic opacity-50">-</span>
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
+
             {filePreview?.previewFailed && (
               <p className="text-xs text-[--text-muted]">Could not preview this file locally — it will still be validated when uploaded.</p>
             )}
 
             {(showSubVertical || leadTypeOptions) && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {showSubVertical && (
+                {showSubVertical && subVerticals.length > 0 && (
                   <FilterInput label="Select Target Sub-Vertical *">
-                    <select required value={subVerticalId} onChange={(e) => setSubVerticalId(e.target.value)} className="w-full">
-                      <option value="">-- Choose Sub-Vertical --</option>
+                    <select value={subVerticalId} onChange={(e) => setSubVerticalId(e.target.value)} className="w-full">
+                      <option value="">-- All Sub-Verticals / Unassigned --</option>
                       {subVerticals.map((sub) => (
                         <option key={sub._id} value={sub._id}>{sub.name}</option>
                       ))}
@@ -363,7 +387,7 @@ export default function CsvImportModal({
               </FilterInput>
             )}
 
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center justify-between pt-2 border-t border-[--border]">
               <div className="flex gap-3">
                 <button
                   type="button"

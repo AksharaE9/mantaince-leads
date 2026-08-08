@@ -1,25 +1,71 @@
 // Client-side pre-validation for bulk lead imports (CSV/Excel).
-//
-// Mirrors server/src/services/leadImportSchema.js#validateRowAgainstSchema —
-// same schema (fetched from GET /leads/csv/schema/:verticalId), same rules —
-// so the fast client-side preview and the authoritative server-side
-// validator can never disagree about what's valid. This is UX speed only;
-// the server always re-validates every row regardless of what this reports.
 
 const IMPORT_PHONE_REGEX = /^\+?\d{7,15}$/;
 
 export const normalizeHeaderKey = (k) =>
-  String(k).toLowerCase().trim().replace(/\r?\n/g, ' ').replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ');
+  String(k || '')
+    .toLowerCase()
+    .trim()
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s*\/\s*/g, '/')
+    .replace(/\s+/g, ' ');
+
+// Clean key for loose matching (ignores non-alphanumeric characters)
+export const canonicalKey = (k) =>
+  String(k || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 export function validateParsedRowsAgainstSchema(rows, schema) {
   let validCount = 0;
   const rowErrors = [];
 
+  // Build a lookup map of schema field canonical keys
+  const schemaMap = schema.map((field) => ({
+    field,
+    canonicalCsvHeader: canonicalKey(field.csvHeader || field.label),
+    canonicalKey: canonicalKey(field.key),
+    normalizedCsvHeader: normalizeHeaderKey(field.csvHeader || field.label),
+  }));
+
+  const previewMappedRows = rows.slice(0, 5).map((row) => {
+    const rowCanonicalMap = {};
+    Object.entries(row).forEach(([k, v]) => {
+      rowCanonicalMap[canonicalKey(k)] = v;
+      rowCanonicalMap[normalizeHeaderKey(k)] = v;
+    });
+
+    const mapped = {};
+    schema.forEach((field) => {
+      const match = schemaMap.find((s) => s.field.key === field.key);
+      const val = rowCanonicalMap[match.normalizedCsvHeader] !== undefined
+        ? rowCanonicalMap[match.normalizedCsvHeader]
+        : (rowCanonicalMap[match.canonicalCsvHeader] !== undefined
+          ? rowCanonicalMap[match.canonicalCsvHeader]
+          : (rowCanonicalMap[match.canonicalKey] !== undefined
+            ? rowCanonicalMap[match.canonicalKey]
+            : ''));
+      mapped[field.key] = val === undefined || val === null ? '' : String(val).trim();
+    });
+    return mapped;
+  });
+
   rows.forEach((row, idx) => {
     const errors = [];
+    const rowCanonicalMap = {};
+    Object.entries(row).forEach(([k, v]) => {
+      rowCanonicalMap[canonicalKey(k)] = v;
+      rowCanonicalMap[normalizeHeaderKey(k)] = v;
+    });
+
     schema.forEach((field) => {
-      const headerKey = normalizeHeaderKey(field.csvHeader || field.label);
-      const raw = row[headerKey];
+      const match = schemaMap.find((s) => s.field.key === field.key);
+      const raw = rowCanonicalMap[match.normalizedCsvHeader] !== undefined
+        ? rowCanonicalMap[match.normalizedCsvHeader]
+        : (rowCanonicalMap[match.canonicalCsvHeader] !== undefined
+          ? rowCanonicalMap[match.canonicalCsvHeader]
+          : (rowCanonicalMap[match.canonicalKey] !== undefined
+            ? rowCanonicalMap[match.canonicalKey]
+            : ''));
+
       const value = raw === undefined || raw === null ? '' : String(raw).trim();
 
       if (field.required && !value) {
@@ -34,9 +80,6 @@ export function validateParsedRowsAgainstSchema(rows, schema) {
       if (field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
         errors.push({ field: field.key, message: `${field.label} is not a valid email address` });
       }
-      if (field.type === 'enum' && field.options?.length && !field.options.some((o) => o.toLowerCase() === value.toLowerCase())) {
-        errors.push({ field: field.key, message: `"${value}" is not a valid ${field.label} option` });
-      }
     });
 
     if (errors.length === 0) {
@@ -46,5 +89,12 @@ export function validateParsedRowsAgainstSchema(rows, schema) {
     }
   });
 
-  return { totalRows: rows.length, validCount, invalidCount: rowErrors.length, rowErrors };
+  return {
+    totalRows: rows.length,
+    validCount,
+    invalidCount: rowErrors.length,
+    rowErrors,
+    previewMappedRows,
+    schemaFields: schema,
+  };
 }

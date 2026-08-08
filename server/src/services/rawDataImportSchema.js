@@ -27,7 +27,7 @@ export const RAW_DATA_FIELDS = [
     { key: 'city', label: 'City', csvHeader: 'City', type: 'string', required: false },
     { key: 'area', label: 'Area', csvHeader: 'Area', type: 'string', required: false },
     { key: 'mapLocation', label: 'Map Location', csvHeader: 'Map Location', type: 'string', required: false },
-    { key: 'callStatus', label: 'Call Status', csvHeader: 'Call Status', type: 'string', required: false },
+    { key: 'callStatus', label: 'Call Status', csvHeader: 'Call Status', type: 'enum', options: ['Connected', 'Busy', 'Not Reachable', 'Switched Off', 'Callback Requested', 'Wrong Number', 'Disconnected'], required: false },
     { key: 'customerResponse', label: 'Customer Response', csvHeader: 'Customer Response', type: 'string', required: false },
     { key: 'followUpRequired', label: 'Follow-up Required', csvHeader: 'Follow-up Required', type: 'enum', options: ['Yes', 'No'], required: false },
     { key: 'followUpDate', label: 'Follow-up Date', csvHeader: 'Follow-up Date', type: 'date', required: false },
