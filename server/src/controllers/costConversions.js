@@ -1289,3 +1289,66 @@ export const scanCosDuplicates = async (req, res) => {
         return sendControllerError(res, error, 'scanCosDuplicates', { section: 'cos', operation: 'duplicate_scan', recordId: reportId });
     }
 };
+
+/**
+ * GET /cost-conversions/check-phone
+ * Searches if a lead is already present or contacted globally using phone number.
+ */
+export const checkLeadPhone = async (req, res) => {
+    const { phone } = req.query;
+    if (!phone) {
+        return res.status(400).json({ success: false, error: 'Phone number is required' });
+    }
+    const sanitizedPhone = phone.toString().replace(/[^\d+]/g, '').trim();
+    if (!sanitizedPhone) {
+        return res.status(400).json({ success: false, error: 'Phone number is invalid' });
+    }
+    try {
+        const userRes = await query('SELECT vertical_access FROM users WHERE id = $1', [req.user.sub]);
+        const userVerticalAccess = (userRes.rows[0]?.vertical_access || []).map(v => String(v));
+
+        const result = await query(`
+            SELECT
+                l.id, l.name, l.phone, l.business_name,
+                l.status, l.source, l.data,
+                l.vertical_id, l.sub_vertical_id,
+                l.assigned_to, l.created_at, l.updated_at,
+                l.lead_type,
+                u.name       AS assignee_name,
+                u.email      AS assignee_email,
+                sv.name      AS sub_vertical_name,
+                v.name       AS vertical_name,
+                v.color      AS vertical_color
+            FROM cost_conversions l
+            LEFT JOIN users         u   ON u.id   = l.assigned_to
+            LEFT JOIN sub_verticals sv  ON sv.id  = l.sub_vertical_id
+            LEFT JOIN verticals     v   ON v.id   = l.vertical_id
+            WHERE l.phone = $1 AND l.is_deleted = false AND (l.duplicate_status IS NULL OR l.duplicate_status NOT IN ('duplicate_removed', 'promoted_removed'))
+            ORDER BY l.created_at DESC
+        `, [sanitizedPhone]);
+
+        // Filter details based on user's vertical access
+        const leads = result.rows.map(lead => {
+            const hasAccess = req.user.role === 'super_admin' || userVerticalAccess.includes(lead.vertical_id);
+            if (hasAccess) {
+                return { ...lead, hasAccess: true };
+            } else {
+                return {
+                    id: lead.id,
+                    phone: lead.phone,
+                    status: lead.status,
+                    lead_type: lead.lead_type,
+                    vertical_name: lead.vertical_name,
+                    sub_vertical_name: lead.sub_vertical_name,
+                    created_at: lead.created_at,
+                    hasAccess: false
+                };
+            }
+        });
+
+        return res.status(200).json({ success: true, data: leads });
+    } catch (error) {
+        return sendControllerError(res, error, 'checkLeadPhone');
+    }
+};
+

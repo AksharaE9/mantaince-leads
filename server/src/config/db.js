@@ -176,6 +176,12 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM information_schema.tables
                 WHERE table_name = 'client_error_logs'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'mv_vertical_stats' AND table_type = 'BASE TABLE'
+            ) AND EXISTS (
+                SELECT 1 FROM pg_trigger
+                WHERE tgname = 'trg_refresh_vertical_stats_on_lead_insert'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -1019,23 +1025,206 @@ const runMigrations = async () => {
           AFTER INSERT OR UPDATE OR DELETE ON sub_verticals
           FOR EACH STATEMENT EXECUTE FUNCTION refresh_mv_vertical_tree();
 
-        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_vertical_stats AS
+        -- Drop the old triggers first
+        DROP TRIGGER IF EXISTS trg_refresh_vertical_stats_on_lead ON cost_conversions;
+        DROP TRIGGER IF EXISTS trg_refresh_stats_on_cost_conversions ON cost_conversions;
+        DROP TRIGGER IF EXISTS trg_refresh_vertical_stats_on_vertical ON verticals;
+        DROP TRIGGER IF EXISTS trg_refresh_vertical_stats_on_subvertical ON sub_verticals;
+        
+        -- Drop old function (using CASCADE to drop any dependent triggers)
+        DROP FUNCTION IF EXISTS refresh_mv_vertical_stats() CASCADE;
+        
+        -- Drop materialized view if it exists
+        DROP MATERIALIZED VIEW IF EXISTS mv_vertical_stats CASCADE;
+        
+        -- Create regular table
+        CREATE TABLE IF NOT EXISTS mv_vertical_stats (
+            vertical_id UUID PRIMARY KEY REFERENCES verticals(id) ON DELETE CASCADE,
+            vertical_name VARCHAR(255),
+            color VARCHAR(50),
+            total_cost_conversions INT DEFAULT 0,
+            new_count INT DEFAULT 0,
+            won_count INT DEFAULT 0,
+            contacted_count INT DEFAULT 0,
+            last_activity_at TIMESTAMP,
+            last_refreshed_at TIMESTAMP DEFAULT NOW()
+        );
+        
+        -- Create the single vertical refresh function
+        CREATE OR REPLACE FUNCTION refresh_vertical_stats(v_id UUID)
+        RETURNS VOID AS $$
+        BEGIN
+            INSERT INTO mv_vertical_stats (
+                vertical_id,
+                vertical_name,
+                color,
+                total_cost_conversions,
+                new_count,
+                won_count,
+                contacted_count,
+                last_activity_at,
+                last_refreshed_at
+            )
+            SELECT
+                v.id AS vertical_id,
+                v.name AS vertical_name,
+                v.color AS color,
+                COALESCE(COUNT(cc.id), 0) AS total_cost_conversions,
+                COALESCE(COUNT(cc.id) FILTER (WHERE cc.status = 'NEW' OR cc.status = 'new'), 0) AS new_count,
+                COALESCE(COUNT(cc.id) FILTER (WHERE cc.status = 'WON' OR cc.status = 'won' OR cc.status = 'converted'), 0) AS won_count,
+                COALESCE(COUNT(cc.id) FILTER (WHERE cc.status = 'CONTACTED' OR cc.status = 'contacted'), 0) AS contacted_count,
+                MAX(cc.created_at) AS last_activity_at,
+                NOW() AS last_refreshed_at
+            FROM verticals v
+            LEFT JOIN sub_verticals sv ON sv.vertical_id = v.id AND sv.is_active = true
+            LEFT JOIN cost_conversions cc ON cc.sub_vertical_id = sv.id AND cc.is_deleted = false
+            WHERE v.id = v_id
+            GROUP BY v.id, v.name, v.color
+            ON CONFLICT (vertical_id) DO UPDATE SET
+                vertical_name = EXCLUDED.vertical_name,
+                color = EXCLUDED.color,
+                total_cost_conversions = EXCLUDED.total_cost_conversions,
+                new_count = EXCLUDED.new_count,
+                won_count = EXCLUDED.won_count,
+                contacted_count = EXCLUDED.contacted_count,
+                last_activity_at = EXCLUDED.last_activity_at,
+                last_refreshed_at = EXCLUDED.last_refreshed_at;
+        END;
+        $$ LANGUAGE plpgsql;
+        
+        -- Populate all active verticals
+        INSERT INTO mv_vertical_stats (
+            vertical_id,
+            vertical_name,
+            color,
+            total_cost_conversions,
+            new_count,
+            won_count,
+            contacted_count,
+            last_activity_at,
+            last_refreshed_at
+        )
         SELECT
-          v.id    AS vertical_id,
-          v.name  AS vertical_name,
-          v.color AS color,
-          COUNT(cc.id) AS total_cost_conversions,
-          COUNT(cc.id) FILTER (WHERE cc.status = 'NEW' OR cc.status = 'new')       AS new_count,
-          COUNT(cc.id) FILTER (WHERE cc.status = 'WON' OR cc.status = 'won' OR cc.status = 'converted')        AS won_count,
-          COUNT(cc.id) FILTER (WHERE cc.status = 'CONTACTED' OR cc.status = 'contacted')  AS contacted_count,
-          MAX(cc.created_at) AS last_activity_at
+            v.id AS vertical_id,
+            v.name AS vertical_name,
+            v.color AS color,
+            COALESCE(COUNT(cc.id), 0) AS total_cost_conversions,
+            COALESCE(COUNT(cc.id) FILTER (WHERE cc.status = 'NEW' OR cc.status = 'new'), 0) AS new_count,
+            COALESCE(COUNT(cc.id) FILTER (WHERE cc.status = 'WON' OR cc.status = 'won' OR cc.status = 'converted'), 0) AS won_count,
+            COALESCE(COUNT(cc.id) FILTER (WHERE cc.status = 'CONTACTED' OR cc.status = 'contacted'), 0) AS contacted_count,
+            MAX(cc.created_at) AS last_activity_at,
+            NOW() AS last_refreshed_at
         FROM verticals v
-        LEFT JOIN sub_verticals sv    ON sv.vertical_id = v.id AND sv.is_active = true
+        LEFT JOIN sub_verticals sv ON sv.vertical_id = v.id AND sv.is_active = true
         LEFT JOIN cost_conversions cc ON cc.sub_vertical_id = sv.id AND cc.is_deleted = false
         WHERE v.is_active = true
-        GROUP BY v.id, v.name, v.color;
-
-        CREATE UNIQUE INDEX IF NOT EXISTS mv_vertical_stats_pk ON mv_vertical_stats (vertical_id);
+        GROUP BY v.id, v.name, v.color
+        ON CONFLICT (vertical_id) DO UPDATE SET
+            vertical_name = EXCLUDED.vertical_name,
+            color = EXCLUDED.color,
+            total_cost_conversions = EXCLUDED.total_cost_conversions,
+            new_count = EXCLUDED.new_count,
+            won_count = EXCLUDED.won_count,
+            contacted_count = EXCLUDED.contacted_count,
+            last_activity_at = EXCLUDED.last_activity_at,
+            last_refreshed_at = EXCLUDED.last_refreshed_at;
+            
+        -- Create statement-level triggers on cost_conversions using transition tables
+        CREATE OR REPLACE FUNCTION trg_refresh_vertical_stats_on_lead_insert_fn()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            PERFORM refresh_vertical_stats(vertical_id)
+            FROM (SELECT DISTINCT vertical_id FROM new_table WHERE vertical_id IS NOT NULL) AS affected;
+            RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+        
+        CREATE OR REPLACE FUNCTION trg_refresh_vertical_stats_on_lead_update_fn()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            PERFORM refresh_vertical_stats(vertical_id)
+            FROM (
+                SELECT vertical_id FROM new_table WHERE vertical_id IS NOT NULL
+                UNION
+                SELECT vertical_id FROM old_table WHERE vertical_id IS NOT NULL
+            ) AS affected;
+            RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+        
+        CREATE OR REPLACE FUNCTION trg_refresh_vertical_stats_on_lead_delete_fn()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            PERFORM refresh_vertical_stats(vertical_id)
+            FROM (SELECT DISTINCT vertical_id FROM old_table WHERE vertical_id IS NOT NULL) AS affected;
+            RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+        
+        DROP TRIGGER IF EXISTS trg_refresh_vertical_stats_on_lead_insert ON cost_conversions;
+        CREATE TRIGGER trg_refresh_vertical_stats_on_lead_insert
+            AFTER INSERT ON cost_conversions
+            REFERENCING NEW TABLE AS new_table
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION trg_refresh_vertical_stats_on_lead_insert_fn();
+            
+        DROP TRIGGER IF EXISTS trg_refresh_vertical_stats_on_lead_update ON cost_conversions;
+        CREATE TRIGGER trg_refresh_vertical_stats_on_lead_update
+            AFTER UPDATE ON cost_conversions
+            REFERENCING NEW TABLE AS new_table OLD TABLE AS old_table
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION trg_refresh_vertical_stats_on_lead_update_fn();
+            
+        DROP TRIGGER IF EXISTS trg_refresh_vertical_stats_on_lead_delete ON cost_conversions;
+        CREATE TRIGGER trg_refresh_vertical_stats_on_lead_delete
+            AFTER DELETE ON cost_conversions
+            REFERENCING OLD TABLE AS old_table
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION trg_refresh_vertical_stats_on_lead_delete_fn();
+            
+        -- Create row-level triggers on verticals and sub_verticals
+        CREATE OR REPLACE FUNCTION trg_refresh_vertical_stats_on_vertical_fn()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                DELETE FROM mv_vertical_stats WHERE vertical_id = OLD.id;
+            ELSE
+                PERFORM refresh_vertical_stats(NEW.id);
+            END IF;
+            RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+        
+        DROP TRIGGER IF EXISTS trg_refresh_vertical_stats_on_vertical ON verticals;
+        CREATE TRIGGER trg_refresh_vertical_stats_on_vertical
+            AFTER INSERT OR UPDATE ON verticals
+            FOR EACH ROW
+            EXECUTE FUNCTION trg_refresh_vertical_stats_on_vertical_fn();
+            
+        CREATE OR REPLACE FUNCTION trg_refresh_vertical_stats_on_subvertical_fn()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                IF OLD.vertical_id IS NOT NULL THEN
+                    PERFORM refresh_vertical_stats(OLD.vertical_id);
+                END IF;
+            ELSE
+                IF NEW.vertical_id IS NOT NULL THEN
+                    PERFORM refresh_vertical_stats(NEW.vertical_id);
+                END IF;
+                IF TG_OP = 'UPDATE' AND OLD.vertical_id IS DISTINCT FROM NEW.vertical_id AND OLD.vertical_id IS NOT NULL THEN
+                    PERFORM refresh_vertical_stats(OLD.vertical_id);
+                END IF;
+            END IF;
+            RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+        
+        DROP TRIGGER IF EXISTS trg_refresh_vertical_stats_on_subvertical ON sub_verticals;
+        CREATE TRIGGER trg_refresh_vertical_stats_on_subvertical
+            AFTER INSERT OR UPDATE OR DELETE ON sub_verticals
+            FOR EACH ROW
+            EXECUTE FUNCTION trg_refresh_vertical_stats_on_subvertical_fn();
     `;
 
     try {

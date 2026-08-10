@@ -11,7 +11,8 @@ import {
   assignCostConversion, 
   exportCostConversionsCsv,
   uploadCostConversionPhoto,
-  scanCosDuplicates
+  scanCosDuplicates,
+  checkLeadPhone
 } from '../controllers/costConversions.js';
 import {
   downloadCsvTemplate,
@@ -92,6 +93,7 @@ router.get('/', checkPermission(['leads:read', 'leads:read_own']), getCostConver
 router.post('/', checkPermission('leads:create'), createCostConversion);
 router.post('/bulk', checkPermission('leads:create'), createCostConversionBulk);
 router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exportCostConversionsCsv);
+router.get('/check-phone', checkPermission(['leads:read', 'leads:read_own']), checkLeadPhone);
 // Literal route — must be registered before /:id, which would otherwise
 // shadow it (Express matches in registration order; see M6 elsewhere in
 // this codebase for the same class of bug).

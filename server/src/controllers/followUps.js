@@ -693,37 +693,102 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
     `, [reportId, req.user.sub, verticalId, totalCandidates]);
 
     // ── Path A: Full atomic move (create follow_up + soft-remove COS) ─────────
-    for (const row of needsFullPromote) {
+    if (needsFullPromote.length > 0) {
+      const followUpsData = needsFullPromote.map(row => {
+        const followUpId = crypto.randomUUID();
+        const assignedToId = row.assigned_to || req.user.sub;
+        const description = `[System-promoted] From COS record "${row.business_name || row.name || 'Unnamed'}" — bulk promotion.`;
+        return {
+          id: followUpId,
+          cost_conversion_id: row.id,
+          sub_vertical_id: row.sub_vertical_id,
+          assigned_to_id: assignedToId,
+          created_by_id: req.user.sub,
+          follow_up_date: today,
+          description,
+          status: 'PENDING'
+        };
+      });
+
       const txClient = await pool.connect();
       try {
         await txClient.query('BEGIN');
 
-        const followUpId = crypto.randomUUID();
-        const assignedToId = row.assigned_to || req.user.sub;
-        const description = `[System-promoted] From COS record "${row.business_name || row.name || 'Unnamed'}" — bulk promotion.`;
+        // Build values and placeholders for bulk insert
+        const insertValues = [];
+        const insertPlaceholders = [];
+        let pIdx = 1;
+        for (const f of followUpsData) {
+          insertPlaceholders.push(`($${pIdx}, $${pIdx+1}, $${pIdx+2}, $${pIdx+3}, $${pIdx+4}, $${pIdx+5}, $${pIdx+6}, $${pIdx+7})`);
+          insertValues.push(f.id, f.cost_conversion_id, f.sub_vertical_id, f.assigned_to_id, f.created_by_id, f.follow_up_date, f.description, f.status);
+          pIdx += 8;
+        }
 
         await txClient.query(`
           INSERT INTO follow_ups (id, cost_conversion_id, sub_vertical_id, assigned_to_id, created_by_id, follow_up_date, description, status)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
-        `, [followUpId, row.id, row.sub_vertical_id, assignedToId, req.user.sub, today, description]);
+          VALUES ${insertPlaceholders.join(', ')}
+        `, insertValues);
+
+        // Build values and placeholders for bulk update of cost_conversions
+        const updateValues = [req.user.sub]; // $1
+        const updatePlaceholders = [];
+        let uIdx = 2;
+        for (const f of followUpsData) {
+          updatePlaceholders.push(`($${uIdx}::uuid, $${uIdx+1}::uuid)`);
+          updateValues.push(f.cost_conversion_id, f.id);
+          uIdx += 2;
+        }
 
         await txClient.query(`
-          UPDATE cost_conversions
+          UPDATE cost_conversions AS c
           SET duplicate_status = 'promoted_removed',
               promoted_at = NOW(),
-              promoted_to_follow_up_id = $1,
-              promoted_by = $2,
+              promoted_to_follow_up_id = u.follow_up_id,
+              promoted_by = $1,
               updated_at = NOW()
-          WHERE id = $3
-        `, [followUpId, req.user.sub, row.id]);
+          FROM (VALUES ${updatePlaceholders.join(', ')}) AS u(lead_id, follow_up_id)
+          WHERE c.id = u.lead_id
+        `, updateValues);
 
         await txClient.query('COMMIT');
-        promoted++;
-        promotedIds.push(row.id);
-      } catch (err) {
+        promoted = needsFullPromote.length;
+        promotedIds.push(...needsFullPromote.map(row => row.id));
+      } catch (bulkErr) {
         await txClient.query('ROLLBACK').catch(() => {});
-        failed++;
-        errors.push({ recordId: row.id, code: ErrorCodes.DB_CONSTRAINT, reason: err.message });
+        console.warn('⚠️ Bulk promotion failed. Falling back to row-by-row execution:', bulkErr.message);
+
+        // Fallback: row-by-row promotion using a single connection to capture specific failures
+        for (const row of needsFullPromote) {
+          try {
+            await txClient.query('BEGIN');
+            const followUpId = crypto.randomUUID();
+            const assignedToId = row.assigned_to || req.user.sub;
+            const description = `[System-promoted] From COS record "${row.business_name || row.name || 'Unnamed'}" — bulk promotion.`;
+
+            await txClient.query(`
+              INSERT INTO follow_ups (id, cost_conversion_id, sub_vertical_id, assigned_to_id, created_by_id, follow_up_date, description, status)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+            `, [followUpId, row.id, row.sub_vertical_id, assignedToId, req.user.sub, today, description]);
+
+            await txClient.query(`
+              UPDATE cost_conversions
+              SET duplicate_status = 'promoted_removed',
+                  promoted_at = NOW(),
+                  promoted_to_follow_up_id = $1,
+                  promoted_by = $2,
+                  updated_at = NOW()
+              WHERE id = $3
+            `, [followUpId, req.user.sub, row.id]);
+
+            await txClient.query('COMMIT');
+            promoted++;
+            promotedIds.push(row.id);
+          } catch (rowErr) {
+            await txClient.query('ROLLBACK').catch(() => {});
+            failed++;
+            errors.push({ recordId: row.id, code: ErrorCodes.DB_CONSTRAINT, reason: rowErr.message });
+          }
+        }
       } finally {
         txClient.release();
       }
@@ -732,22 +797,52 @@ export const promoteCosLeadsToFollowUps = async (req, res) => {
     // ── Path B: Soft-remove only (follow_up already existed, COS not removed) ──
     // No new follow_up is created — the existing one is kept as-is.
     // This handles the legacy promotion runs that were link-only.
-    for (const row of linkedNotRemoved) {
+    if (linkedNotRemoved.length > 0) {
       try {
+        const updateValues = [req.user.sub]; // $1
+        const updatePlaceholders = [];
+        let uIdx = 2;
+        for (const row of linkedNotRemoved) {
+          updatePlaceholders.push(`($${uIdx}::uuid, $${uIdx+1}::uuid)`);
+          updateValues.push(row.id, row.existing_follow_up_id);
+          uIdx += 2;
+        }
+
         await query(`
-          UPDATE cost_conversions
+          UPDATE cost_conversions AS c
           SET duplicate_status = 'promoted_removed',
               promoted_at = NOW(),
-              promoted_to_follow_up_id = $1,
-              promoted_by = $2,
+              promoted_to_follow_up_id = u.follow_up_id,
+              promoted_by = $1,
               updated_at = NOW()
-          WHERE id = $3
-        `, [row.existing_follow_up_id, req.user.sub, row.id]);
-        softRemovedOnly++;
-        softRemovedIds.push(row.id);
-      } catch (err) {
-        failed++;
-        errors.push({ recordId: row.id, code: ErrorCodes.DB_CONSTRAINT, reason: err.message, path: 'soft_remove_only' });
+          FROM (VALUES ${updatePlaceholders.join(', ')}) AS u(lead_id, follow_up_id)
+          WHERE c.id = u.lead_id
+        `, updateValues);
+
+        softRemovedOnly = linkedNotRemoved.length;
+        softRemovedIds.push(...linkedNotRemoved.map(row => row.id));
+      } catch (bulkErr) {
+        console.warn('⚠️ Bulk soft-remove failed. Falling back to row-by-row execution:', bulkErr.message);
+
+        // Fallback: row-by-row soft-remove
+        for (const row of linkedNotRemoved) {
+          try {
+            await query(`
+              UPDATE cost_conversions
+              SET duplicate_status = 'promoted_removed',
+                  promoted_at = NOW(),
+                  promoted_to_follow_up_id = $1,
+                  promoted_by = $2,
+                  updated_at = NOW()
+              WHERE id = $3
+            `, [row.existing_follow_up_id, req.user.sub, row.id]);
+            softRemovedOnly++;
+            softRemovedIds.push(row.id);
+          } catch (rowErr) {
+            failed++;
+            errors.push({ recordId: row.id, code: ErrorCodes.DB_CONSTRAINT, reason: rowErr.message, path: 'soft_remove_only' });
+          }
+        }
       }
     }
 

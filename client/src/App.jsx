@@ -14,6 +14,7 @@ const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage.jsx'));
 
 const LeadsPage = lazy(() => import('./pages/LeadsPage.jsx'));
 const LeadDetailPage = lazy(() => import('./pages/LeadDetailPage.jsx'));
+const SearchLeadPage = lazy(() => import('./pages/SearchLeadPage.jsx'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage.jsx'));
 
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage.jsx'));
@@ -129,6 +130,7 @@ export const App = () => {
 
               <Route path="leads" element={<LeadsPage />} />
               <Route path="leads/:id" element={<LeadDetailPage />} />
+              <Route path="search-lead" element={<SearchLeadPage />} />
 
               <Route path="reports" element={<ReportsPage />} />
               <Route path="calendar" element={<CalendarPage />} />

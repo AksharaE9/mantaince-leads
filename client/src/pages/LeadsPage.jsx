@@ -414,6 +414,25 @@ export const LeadsPage = () => {
     setLeadModalOpen(true);
   };
 
+  useEffect(() => {
+    const openAdd = searchParams.get('openAdd');
+    const phoneVal = searchParams.get('phone');
+    if (openAdd === 'true') {
+      if (!activeVertical) {
+        toast('Please select a business vertical to register the lead.', { icon: '💼' });
+        return;
+      }
+      handleOpenAdd();
+      if (phoneVal) {
+        setLeadFormPhone(phoneVal);
+      }
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('openAdd');
+      newParams.delete('phone');
+      setSearchParams(newParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, activeVertical]);
+
   const handleOpenEdit = (lead) => {
     setSelectedLead(lead);
     setFormErrors([]);
@@ -834,7 +853,10 @@ export const LeadsPage = () => {
           onSelect={(v) => {
             setActiveVertical(v);
             setActiveSubVertical(null);
-            navigate(`/leads?verticalId=${v._id}`);
+            const next = new URLSearchParams(searchParams);
+            next.set('verticalId', v._id);
+            next.delete('subVerticalId');
+            navigate(`/leads?${next.toString()}`);
           }}
         />
 
@@ -934,7 +956,10 @@ export const LeadsPage = () => {
         onSelect={(v) => {
           setActiveVertical(v);
           setActiveSubVertical(null);
-          navigate(`/leads?verticalId=${v._id}`);
+          const next = new URLSearchParams(searchParams);
+          next.set('verticalId', v._id);
+          next.delete('subVerticalId');
+          navigate(`/leads?${next.toString()}`);
         }}
       />
 

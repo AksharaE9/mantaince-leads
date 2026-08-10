@@ -4,7 +4,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Layers, Users, Settings, LogOut, ChevronDown,
   Menu, X, Bell, BarChart3, ChevronRight, FileSpreadsheet, Calendar, ClipboardList, TrendingUp, Terminal,
-  Database, Truck, AlertTriangle,
+  Database, Truck, AlertTriangle, Search,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore.js';
 import { useUiStore } from '../store/uiStore.js';
@@ -296,6 +296,7 @@ export const AppLayout = () => {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5">
+          {navLink('/search-lead', Search, 'Search Lead', true)}
           {navLink('/follow-ups-positives', Calendar, 'Follow-ups/Positives', true)}
           {navLink('/leads', Layers, 'COS', false)}
           {navLink('/raw-data', Database, 'Raw Data', true)}
@@ -372,6 +373,7 @@ export const AppLayout = () => {
             </div>
             <nav className="flex-1 space-y-0.5 text-sm overflow-y-auto">
               {[
+                ['/search-lead', Search, 'Search Lead'],
                 ['/follow-ups-positives', Calendar, 'Follow-ups/Positives'],
                 ['/leads', Layers, 'COS'],
                 ['/raw-data', Database, 'Raw Data'],

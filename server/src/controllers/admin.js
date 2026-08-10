@@ -582,6 +582,7 @@ export const getAdminDashboardStats = async (req, res) => {
         new: parseInt(row.new_count || 0, 10),
         won: parseInt(row.won_count || 0, 10),
         contacted: parseInt(row.contacted_count || 0, 10),
+        lastRefreshedAt: row.last_refreshed_at || null,
         byStatus: {
           new: parseInt(row.new_count || 0, 10),
           won: parseInt(row.won_count || 0, 10),
@@ -633,6 +634,7 @@ export const getAdminDashboardStats = async (req, res) => {
         convertedLeads: vMvStats.won,
         conversionRate: vMvStats.total > 0 ? parseFloat(((vMvStats.won / vMvStats.total) * 100).toFixed(2)) : 0,
         statusDistribution: vMvStats.byStatus,
+        lastRefreshedAt: vMvStats.lastRefreshedAt,
         subVerticals: vSubs
       };
     });

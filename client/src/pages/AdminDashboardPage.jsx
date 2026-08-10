@@ -143,7 +143,15 @@ export const AdminDashboardPage = () => {
                       {v.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </div>
-                  <p className="text-xs text-[--text-secondary]">Slug: <span className="font-mono">{v.slug}</span></p>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[--text-secondary]">
+                    <p>Slug: <span className="font-mono">{v.slug}</span></p>
+                    {v.lastRefreshedAt && (
+                      <p className="flex items-center gap-1 text-[--text-muted]">
+                        <span>•</span>
+                        <span>As of: {new Date(v.lastRefreshedAt).toLocaleTimeString()}</span>
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 {/* Vertical metrics */}

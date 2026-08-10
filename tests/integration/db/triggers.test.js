@@ -65,6 +65,45 @@ describe('Database Triggers Integration', () => {
     await query('DELETE FROM cost_conversions WHERE id = $1', [leadId]);
   });
 
+  it('automatically refreshes mv_vertical_stats when a cost_conversion is inserted and deleted', async () => {
+    // 1. Get initial stats
+    const beforeRes = await query('SELECT * FROM mv_vertical_stats WHERE vertical_id = $1', [testVerticalId]);
+    const beforeStats = beforeRes.rows[0] || { total_cost_conversions: '0' };
+    const beforeCount = parseInt(beforeStats.total_cost_conversions || 0, 10);
+
+    // 2. Insert new lead
+    const randomPhone = '+1555' + Math.floor(100000 + Math.random() * 900000);
+    const res = await request(app)
+      .post('/api/v1/cost-conversions')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Stats trigger test',
+        phone: randomPhone,
+        businessName: 'Stats trigger corp',
+        verticalId: testVerticalId,
+        subVerticalId: testSubVerticalId,
+        leadType: 'CALL',
+        data: { employeeName: 'shubhanga v' }
+      })
+      .expect(201);
+
+    const leadId = res.body.data.id || res.body.data._id;
+    expect(leadId).toBeTruthy();
+
+    // 3. Query stats again
+    const afterRes = await query('SELECT * FROM mv_vertical_stats WHERE vertical_id = $1', [testVerticalId]);
+    const afterCount = parseInt(afterRes.rows[0]?.total_cost_conversions || 0, 10);
+    expect(afterCount).toBe(beforeCount + 1);
+
+    // 4. Delete the lead
+    await query('DELETE FROM cost_conversions WHERE id = $1', [leadId]);
+
+    // 5. Query stats again
+    const finalRes = await query('SELECT * FROM mv_vertical_stats WHERE vertical_id = $1', [testVerticalId]);
+    const finalCount = parseInt(finalRes.rows[0]?.total_cost_conversions || 0, 10);
+    expect(finalCount).toBe(beforeCount);
+  });
+
   afterAll(async () => {
     if (testVerticalId) {
       await query('DELETE FROM verticals WHERE id = $1', [testVerticalId]);
