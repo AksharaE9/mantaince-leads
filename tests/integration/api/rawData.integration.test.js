@@ -69,14 +69,15 @@ describe('Raw Data API', () => {
     });
 
     describe('GET /api/v1/raw-data/schema and /import-template — shared schema, dynamic template', () => {
-        it('exposes the same 11-field schema used by the validator', async () => {
+        it('exposes the same 18-field schema used by the validator', async () => {
             const res = await request(app)
                 .get('/api/v1/raw-data/schema')
                 .set('Authorization', `Bearer ${adminToken}`)
                 .expect(200);
             expect(res.body.data.fields.map(f => f.key)).toEqual([
-                'date', 'employeeName', 'businessType', 'businessName', 'area', 'city',
-                'phoneNumber', 'address', 'appointmentDate', 'appointmentTimings', 'remarks',
+                'date', 'employeeName', 'productService', 'leadName', 'contactPerson', 'phoneNumber',
+                'alternateNumber', 'city', 'area', 'mapLocation', 'callStatus', 'customerResponse',
+                'followUpRequired', 'followUpDate', 'followUpTime', 'nextAction', 'remarks', 'converted',
             ]);
         });
 
@@ -86,7 +87,7 @@ describe('Raw Data API', () => {
                 .set('Authorization', `Bearer ${adminToken}`)
                 .expect(200);
             expect(res.headers['content-type']).toContain('text/csv');
-            expect(res.text).toContain('Business Name');
+            expect(res.text).toContain('Lead Name');
             expect(res.text.toLowerCase()).not.toContain('vertical');
         });
 
@@ -107,9 +108,6 @@ describe('Raw Data API', () => {
     });
 
     describe('GET /api/v1/raw-data — filters, sort, totalPages, and CSV export (section-page promotion)', () => {
-        // Own isolated fixture rows (unique "Filter Test" name prefix + unique
-        // businessType markers) so assertions never depend on how many rows
-        // other describe blocks in this file happen to have created first.
         beforeAll(async () => {
             const rows = [
                 { date: '2026-07-01', businessName: 'Filter Test Alpha', businessType: 'FilterTestRetail', city: 'Chennai', phoneNumber: '9876504001' },
@@ -191,7 +189,7 @@ describe('Raw Data API', () => {
             expect(res.text).toContain('Filter Test Alpha');
             expect(res.text).toContain('Filter Test Gamma');
             expect(res.text).not.toContain('Filter Test Beta');
-            expect(res.text.split('\n')[0]).toContain('Business Name');
+            expect(res.text.split('\n')[0]).toContain('Lead Name');
         });
     });
 
