@@ -161,6 +161,114 @@ function toSchemaKeyedRow(normalizedRawRow) {
     return row;
 }
 
+// Schema field labels for the upfront header validator error message.
+const SCHEMA_FIELD_LABELS = {
+    date: 'Date',
+    employeeName: 'Employee Name',
+    productService: 'Product/Service',
+    leadName: 'Lead Name',
+    contactPerson: 'Contact Person',
+    phoneNumber: 'Mobile Number',   // canonical label as shown in the template
+    alternateNumber: 'Alternate Number(If Any)',
+    city: 'City',
+    area: 'Area',
+    mapLocation: 'Map Location',
+    callStatus: 'Call Status',
+    customerResponse: 'Customer Response',
+    followUpRequired: 'Follow-up Required',
+    followUpDate: 'Follow-up Date',
+    followUpTime: 'Follow-up Time',
+    nextAction: 'Next Action',
+    remarks: 'Remarks',
+    converted: 'Converted (Y/N)',
+};
+
+// Only phoneNumber is mandatory (phone-number-only-mandatory policy).
+const REQUIRED_SCHEMA_KEYS = new Set(['phoneNumber']);
+
+/**
+ * Upfront header validation — runs BEFORE any row-level processing.
+ *
+ * If the required phone column cannot be found via either HEADER_KEY_MAP
+ * or CANONICAL_HEADER_MAP, returns { ok: false, fatalError } so the
+ * caller can abort with one clear file-level error instead of N row errors.
+ * Otherwise returns { ok: true, aliasMatches, extraColumns, missingOptional }
+ * for transparent alias-match and column-notice reporting.
+ */
+function validateFileHeaders(rawRows) {
+    if (!rawRows || rawRows.length === 0) {
+        return { ok: true, aliasMatches: [], extraColumns: [], missingOptional: [] };
+    }
+
+    const originalHeaders = Object.keys(rawRows[0]);
+    const normalizedToOriginal = new Map();
+    for (const h of originalHeaders) {
+        const norm = h.toLowerCase().trim().replace(/\r?\n/g, ' ').replace(/\s+/g, ' ');
+        if (!normalizedToOriginal.has(norm)) normalizedToOriginal.set(norm, h);
+    }
+
+    const resolvedKeys = new Map();
+    const aliasMatches = [];
+    const unmappedHeaders = [];
+
+    for (const [norm, original] of normalizedToOriginal) {
+        // Tier 1: exact normalized match
+        const tier1Key = HEADER_KEY_MAP[norm];
+        if (tier1Key) {
+            if (!resolvedKeys.has(tier1Key)) {
+                resolvedKeys.set(tier1Key, original);
+                const canonicalLabel = SCHEMA_FIELD_LABELS[tier1Key];
+                if (canonicalLabel && original.trim() !== canonicalLabel) {
+                    aliasMatches.push({ originalHeader: original, schemaKey: tier1Key, schemaLabel: canonicalLabel });
+                }
+            }
+            continue;
+        }
+        // Tier 2: strip all non-alphanumeric characters, lowercase
+        const canonical = norm.replace(/[^a-z0-9]/g, '');
+        const tier2Key = CANONICAL_HEADER_MAP[canonical];
+        if (tier2Key) {
+            if (!resolvedKeys.has(tier2Key)) {
+                resolvedKeys.set(tier2Key, original);
+                const canonicalLabel = SCHEMA_FIELD_LABELS[tier2Key];
+                if (canonicalLabel && original.trim() !== canonicalLabel) {
+                    aliasMatches.push({ originalHeader: original, schemaKey: tier2Key, schemaLabel: canonicalLabel });
+                }
+            }
+            continue;
+        }
+        unmappedHeaders.push(original);
+    }
+
+    const missingRequired = [];
+    for (const key of REQUIRED_SCHEMA_KEYS) {
+        if (!resolvedKeys.has(key)) missingRequired.push(SCHEMA_FIELD_LABELS[key] || key);
+    }
+
+    if (missingRequired.length > 0) {
+        const foundList = originalHeaders.join(', ');
+        const expectedList = Object.values(SCHEMA_FIELD_LABELS).join(', ');
+        const fatalError = {
+            row: 0,
+            code: 'FILE_STRUCTURE_ERROR',
+            reason:
+                `This file doesn't match the Raw Data template. ` +
+                `Missing required column: '${missingRequired.join("', '")}'. ` +
+                `Found columns: ${foundList}. ` +
+                `Expected columns: ${expectedList}. ` +
+                `Please download the current template and re-upload.`,
+        };
+        return { ok: false, fatalError };
+    }
+
+    const extraColumns = unmappedHeaders;
+    const missingOptional = Object.keys(SCHEMA_FIELD_LABELS)
+        .filter(k => !REQUIRED_SCHEMA_KEYS.has(k) && !resolvedKeys.has(k))
+        .map(k => SCHEMA_FIELD_LABELS[k]);
+
+    return { ok: true, aliasMatches, extraColumns, missingOptional };
+}
+
 const toDateOrNull = parseFlexibleDate;
 
 async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, successCount, errorsArr, duplicateCount, failedCountOverride) {
@@ -206,6 +314,32 @@ export const processRawDataJob = async (job) => {
                 [batchId, JSON.stringify(errors)]);
             await emitProgress(batchId, uploadedBy, verticalId, 'done', 0, 0, errors, 0);
             return;
+        }
+
+        // ── Upfront header validation ─────────────────────────────────────────
+        // Runs BEFORE any row-level processing. If the required phone column
+        // cannot be found, aborts immediately with a single clear file-level
+        // error rather than N confusing "Mobile Number is required" row errors.
+        const headerCheck = validateFileHeaders(rows);
+        if (!headerCheck.ok) {
+            errors.push(headerCheck.fatalError);
+            await query(`
+                UPDATE csv_upload_logs
+                SET status = 'done', success_count = 0, failed_count = 0, duplicate_count = 0,
+                    errors = $2, processing_finished_at = NOW()
+                WHERE id = $1
+            `, [batchId, JSON.stringify(errors)]);
+            await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, 0, errors, 0, 0);
+            return;
+        }
+        for (const am of headerCheck.aliasMatches) {
+            errors.push({ row: 0, code: 'ALIAS_MATCH', reason: `Matched '${am.originalHeader}' → ${am.schemaLabel}`, warning: true });
+        }
+        if (headerCheck.extraColumns.length > 0) {
+            errors.push({ row: 0, code: 'FILE_WARNING', reason: `Unrecognized columns ignored: ${headerCheck.extraColumns.join(', ')}`, warning: true });
+        }
+        if (headerCheck.missingOptional.length > 0) {
+            errors.push({ row: 0, code: 'FILE_WARNING', reason: `Optional columns not found in file (will be blank): ${headerCheck.missingOptional.join(', ')}`, warning: true });
         }
 
         const [agents, knownBusinessTypes] = await Promise.all([

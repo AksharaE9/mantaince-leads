@@ -140,6 +140,79 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
     }, 3_600);
 }
 
+// All the normalized header aliases that can resolve to the phone (contact)
+// field for COS/Positives imports. Used by the upfront header validator
+// to produce a single file-level error instead of N per-row failures.
+const PHONE_HEADER_ALIASES = new Set([
+    'contact number', 'contact', 'contact no', 'number', 'phone', 'mobile',
+    'mobile number', 'phone number', 'contact number', 'mobile no', 'phone no',
+]);
+
+// Aliases for the business name column — used to detect if the column exists.
+const BUSINESS_NAME_HEADER_ALIASES = new Set([
+    'business/person/shop/company name',
+    'business person, shop, and company name',
+    'name', 'business name', 'business', 'lead name', 'company name',
+]);
+
+/**
+ * Upfront header check for COS/Positives — runs BEFORE any row-level
+ * processing. Returns { ok: false, fatalError } if no phone column can
+ * be found at all, otherwise { ok: true } plus non-blocking notices.
+ */
+function validateCsvFileHeaders(rawRows, leadType) {
+    if (!rawRows || rawRows.length === 0) return { ok: true };
+
+    const originalHeaders = Object.keys(rawRows[0]);
+    const normalizedHeaders = originalHeaders.map(h =>
+        h.toLowerCase().trim().replace(/\r?\n/g, ' ').replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ')
+    );
+
+    const hasPhone = normalizedHeaders.some(h => PHONE_HEADER_ALIASES.has(h));
+    if (!hasPhone) {
+        const section = leadType === 'POSITIVE' ? 'Positives & Follow-ups' : 'COS';
+        const foundList = originalHeaders.join(', ');
+        const expectedPhoneAliases = 'Contact Number, Mobile Number, Phone Number, Mobile, Phone';
+        return {
+            ok: false,
+            fatalError: {
+                row: 0,
+                code: 'FILE_STRUCTURE_ERROR',
+                reason:
+                    `This file doesn't match the ${section} template. ` +
+                    `Missing required column: 'Contact Number' (also accepted as: ${expectedPhoneAliases}). ` +
+                    `Found columns: ${foundList}. ` +
+                    `Please download the current template and re-upload.`,
+            },
+        };
+    }
+
+    // Informational: report any unrecognized columns
+    const KNOWN_HEADERS_CALL = new Set([
+        'date', 'employee name', 'business type',
+        'business/person/shop/company name', 'name', 'business name',
+        'contact number', 'contact', 'phone', 'mobile', 'mobile number', 'phone number',
+        'point of contact', 'pointofcontact', 'area', 'city',
+        'link address', 'delivered location', 'address',
+        'remarks', 'recordings',
+        'appointment type (yes or no)', 'appointment type', 'appointment date', 'appointment time',
+        'requirement order if any', 'requirement',
+        'notes to the cos if any', 'notes',
+    ]);
+    const KNOWN_HEADERS_POSITIVE = new Set([
+        'date', 'employee name', 'business type',
+        'business/person/shop/company name', 'name', 'business name',
+        'area', 'city', 'contact number', 'contact', 'phone', 'mobile', 'mobile number', 'phone number',
+        'point of contact', 'pointofcontact', 'remarks', 'recordings',
+        'follow-up required', 'follow-ups', 'follow-up dates', 'follow-up remarks',
+        'requirement if any', 'requirement',
+        'a notes to the cos team only', 'notes',
+    ]);
+    const knownSet = leadType === 'POSITIVE' ? KNOWN_HEADERS_POSITIVE : KNOWN_HEADERS_CALL;
+    const extraColumns = originalHeaders.filter((h, i) => !knownSet.has(normalizedHeaders[i]));
+    return { ok: true, extraColumns };
+}
+
 /**
  * Queue processor function — called by worker.js for each queued CSV upload.
  */
@@ -196,6 +269,30 @@ const processCsvJob = async (job) => {
         // Sheet/format warnings (e.g. "only the first sheet was used") ride along
         // as informational, non-fatal row-0 entries in the same errors array.
         for (const w of warnings) errors.push({ row: 0, code: 'FILE_WARNING', reason: w });
+
+        // ── Upfront header validation ─────────────────────────────────────────
+        // Runs BEFORE any row-level processing. Prevents N confusing
+        // "Missing contact number" per-row errors when the file has the wrong
+        // column structure entirely.
+        const csvHeaderCheck = validateCsvFileHeaders(rows, leadType);
+        if (!csvHeaderCheck.ok) {
+            errors.push(csvHeaderCheck.fatalError);
+            await query(`
+                UPDATE csv_upload_logs
+                SET status = 'done', success_count = 0, failed_count = 0, duplicate_count = 0,
+                    errors = $2, processing_finished_at = NOW()
+                WHERE id = $1
+            `, [batchId, JSON.stringify(errors)]);
+            await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, 0, errors, 0, 0);
+            return;
+        }
+        if (csvHeaderCheck.extraColumns && csvHeaderCheck.extraColumns.length > 0) {
+            errors.push({
+                row: 0, code: 'FILE_WARNING',
+                reason: `Unrecognized columns ignored: ${csvHeaderCheck.extraColumns.join(', ')}`,
+                warning: true,
+            });
+        }
 
         await emitProgress(batchId, uploadedBy, verticalId, 'processing', totalRows, 0, errors, 0);
 

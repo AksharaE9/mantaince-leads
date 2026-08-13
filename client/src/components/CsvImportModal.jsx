@@ -468,31 +468,107 @@ export default function CsvImportModal({
               </div>
             </div>
 
-            {uploadResult.errors.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">Error Log Summary:</span>
-                  {uploadResult.batchId && (
-                    <button
-                      type="button"
-                      onClick={downloadFailedRecords}
-                      className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
-                    >
-                      <Download size={11} />
-                      <span>Download Failed Records</span>
-                    </button>
-                  )}
-                </div>
-                <div className="border border-red-100 rounded-lg p-3 bg-red-50/20 max-h-[140px] overflow-y-auto text-xs font-mono text-red-600 space-y-1">
-                  {uploadResult.errors.slice(0, 50).map((err, idx) => (
-                    <div key={idx} className="flex gap-2">
-                      <span className="font-bold">Row {err.row}:</span>
-                      <span>{err.reason}</span>
+            {uploadResult.errors.length > 0 && (() => {
+              // Separate file-level notices (row=0) from row-level errors
+              const fileLevelEntries = uploadResult.errors.filter(e => e.row === 0);
+              const structureErrors = fileLevelEntries.filter(e => e.code === 'FILE_STRUCTURE_ERROR');
+              const aliasMatches = fileLevelEntries.filter(e => e.code === 'ALIAS_MATCH');
+              const fileWarnings = fileLevelEntries.filter(e => e.code === 'FILE_WARNING' || (e.warning && e.row === 0));
+              const rowErrors = uploadResult.errors.filter(e => e.row !== 0 && !e.warning);
+
+              return (
+                <div className="space-y-2">
+                  {/* FILE_STRUCTURE_ERROR — prominent amber banner with template download */}
+                  {structureErrors.map((err, idx) => (
+                    <div key={idx} className="border border-amber-300 rounded-lg p-3 bg-amber-50 space-y-2">
+                      <p className="text-[11px] font-bold text-amber-800 uppercase tracking-wide">⚠ Wrong Template Detected</p>
+                      <p className="text-xs text-amber-900 leading-relaxed">{err.reason}</p>
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadTemplate('xlsx')}
+                          className="text-[11px] font-bold text-amber-800 border border-amber-300 bg-amber-100 hover:bg-amber-200 rounded px-2 py-1 flex items-center gap-1"
+                        >
+                          <Download size={11} />
+                          Download Correct Template (.xlsx)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadTemplate('csv')}
+                          className="text-[11px] font-bold text-amber-800 border border-amber-300 bg-amber-100 hover:bg-amber-200 rounded px-2 py-1 flex items-center gap-1"
+                        >
+                          <Download size={11} />
+                          CSV Template
+                        </button>
+                      </div>
                     </div>
                   ))}
+
+                  {/* ALIAS_MATCH — blue info notices */}
+                  {aliasMatches.length > 0 && (
+                    <div className="border border-blue-200 rounded-lg p-2.5 bg-blue-50/60 space-y-0.5">
+                      <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide mb-1">ℹ Column Mapping Applied</p>
+                      {aliasMatches.map((am, idx) => (
+                        <p key={idx} className="text-[11px] text-blue-800 font-mono">{am.reason}</p>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* FILE_WARNING — muted amber notices */}
+                  {fileWarnings.length > 0 && (
+                    <div className="border border-amber-100 rounded-lg p-2.5 bg-amber-50/40 space-y-0.5">
+                      <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide mb-1">File Notices</p>
+                      {fileWarnings.map((fw, idx) => (
+                        <p key={idx} className="text-[11px] text-amber-800">{fw.reason}</p>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Row-level errors */}
+                  {rowErrors.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">
+                          Row Errors ({rowErrors.length}):
+                        </span>
+                        {uploadResult.batchId && (
+                          <button
+                            type="button"
+                            onClick={downloadFailedRecords}
+                            className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
+                          >
+                            <Download size={11} />
+                            <span>Download Failed Records</span>
+                          </button>
+                        )}
+                      </div>
+                      <div className="border border-red-100 rounded-lg p-3 bg-red-50/20 max-h-[140px] overflow-y-auto text-xs font-mono text-red-600 space-y-1">
+                        {rowErrors.slice(0, 50).map((err, idx) => (
+                          <div key={idx} className="flex gap-2">
+                            <span className="font-bold">Row {err.row}:</span>
+                            <span>{err.reason}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Download failed rows button when there are no row errors shown (only file-level issues) */}
+                  {rowErrors.length === 0 && uploadResult.batchId && structureErrors.length === 0 && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={downloadFailedRecords}
+                        className="text-[10px] font-bold text-[--accent] hover:underline flex items-center gap-1 bg-transparent border-0 cursor-pointer"
+                      >
+                        <Download size={11} />
+                        <span>Download Failed Records</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div className="flex justify-end pt-2">
               <button

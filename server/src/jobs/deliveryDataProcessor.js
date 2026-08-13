@@ -35,29 +35,247 @@ function normalizeRowKeys(rawRow) {
     return row;
 }
 
+// ── Header alias maps ────────────────────────────────────────────────────────
+// Two-tier matching strategy (same pattern as rawDataProcessor.js):
+//
+// Tier 1 — HEADER_KEY_MAP: exact matches on the normalized (lowercased, trimmed,
+// whitespace-collapsed) header string. Catches every real column name seen in
+// production uploads, including the canonical template name AND every common
+// variant actually used by this customer's files.
+//
+// Tier 2 — CANONICAL_HEADER_MAP: fallback for headers that don't match Tier 1;
+// normalizes further by stripping all non-alphanumeric characters before
+// lookup. Catches punctuation differences ("phone/number" vs. "phone number"),
+// spacing variations, and camel-cased header exports.
+//
+// Critical fix: 'mobile number' was missing from the original HEADER_KEY_MAP —
+// this was the sole cause of every Delivery Data upload failing when the
+// uploaded file used "Mobile Number" instead of "Phone Number".
 const HEADER_KEY_MAP = {
+    // ── Date / Employee ─────────────────────────────────────────────────────
     date: 'date',
     'employee name': 'employeeName',
+    'agent name': 'employeeName',
+    employee: 'employeeName',
+    agent: 'employeeName',
+    // ── Business Type / Business Name ────────────────────────────────────────
     'business type': 'businessType',
+    'product/service': 'businessType',
+    'product service': 'businessType',
     'business name': 'businessName',
+    'lead name': 'businessName',                              // ← this file's column
+    'company name': 'businessName',
+    'shop name': 'businessName',
+    'business / person / shop / company name': 'businessName',
+    'business/person/shop/company name': 'businessName',
+    // ── Geography ───────────────────────────────────────────────────────────
     area: 'area',
     city: 'city',
+    // ── Phone ───────────────────────────────────────────────────────────────
     'phone number': 'phoneNumber',
+    'mobile number': 'phoneNumber',                           // ← THE critical fix
+    'contact number': 'phoneNumber',
+    'mobile no': 'phoneNumber',
+    'phone no': 'phoneNumber',
+    mobile: 'phoneNumber',
+    phone: 'phoneNumber',
+    contact: 'phoneNumber',
+    // ── Address ─────────────────────────────────────────────────────────────
     address: 'address',
-    adress: 'address', // tolerate the source template's original typo on re-uploads
+    adress: 'address',                                        // tolerate template typo
+    'map location': 'address',                                // ← this file's column
+    'link address': 'address',
+    'map location link / address': 'address',
+    'map location link/address': 'address',
+    // ── Appointment ─────────────────────────────────────────────────────────
     'appointment date': 'appointmentDate',
     'appointment timings': 'appointmentTimings',
+    'appointment time': 'appointmentTimings',
+    'follow-up date': 'appointmentDate',
+    'follow up date': 'appointmentDate',
+    'follow-up time': 'appointmentTimings',
+    'follow up time': 'appointmentTimings',
+    // ── Remarks ─────────────────────────────────────────────────────────────
     remarks: 'remarks',
+    notes: 'remarks',
+    remark: 'remarks',
+    // ── Delivery-specific ───────────────────────────────────────────────────
     'delivery date': 'deliveryDate',
     'delivery time': 'deliveryTime',
 };
 
+// Tier-2 fallback: strip all non-alphanumeric characters, lowercase.
+// Catches e.g. "Phone/Number" → "phonenumber", "Mobile-Number" → "mobilenumber".
+const CANONICAL_HEADER_MAP = {
+    date: 'date',
+    employeename: 'employeeName',
+    agentname: 'employeeName',
+    employee: 'employeeName',
+    agent: 'employeeName',
+    businesstype: 'businessType',
+    productservice: 'businessType',
+    businessname: 'businessName',
+    leadname: 'businessName',
+    companyname: 'businessName',
+    shopname: 'businessName',
+    businesspersonshopcompanyname: 'businessName',
+    area: 'area',
+    city: 'city',
+    phonenumber: 'phoneNumber',
+    mobilenumber: 'phoneNumber',
+    contactnumber: 'phoneNumber',
+    mobileno: 'phoneNumber',
+    phoneno: 'phoneNumber',
+    mobile: 'phoneNumber',
+    phone: 'phoneNumber',
+    contact: 'phoneNumber',
+    address: 'address',
+    adress: 'address',
+    maplocation: 'address',
+    linkaddress: 'address',
+    appointmentdate: 'appointmentDate',
+    appointmenttimings: 'appointmentTimings',
+    appointmenttime: 'appointmentTimings',
+    followupdate: 'appointmentDate',
+    followuptime: 'appointmentTimings',
+    remarks: 'remarks',
+    notes: 'remarks',
+    remark: 'remarks',
+    deliverydate: 'deliveryDate',
+    deliverytime: 'deliveryTime',
+};
+
+// Schema field labels for the upfront header validator error message.
+const SCHEMA_FIELD_LABELS = {
+    date: 'Date',
+    employeeName: 'Employee Name',
+    businessType: 'Business Type',
+    businessName: 'Business Name',
+    area: 'Area',
+    city: 'City',
+    phoneNumber: 'Mobile Number',   // canonical label as shown in the template
+    address: 'Address',
+    appointmentDate: 'Appointment Date',
+    appointmentTimings: 'Appointment Timings',
+    remarks: 'Remarks',
+    deliveryDate: 'Delivery Date',
+    deliveryTime: 'Delivery Time',
+};
+
+// Required schema keys — only phoneNumber blocks a row (phone-number-only-mandatory policy).
+const REQUIRED_SCHEMA_KEYS = new Set(['phoneNumber']);
+
 function toSchemaKeyedRow(normalizedRawRow) {
     const row = {};
-    for (const [header, schemaKey] of Object.entries(HEADER_KEY_MAP)) {
-        if (normalizedRawRow[header] !== undefined) row[schemaKey] = normalizedRawRow[header];
+    for (const [rawHeader, rawVal] of Object.entries(normalizedRawRow)) {
+        // Tier 1: exact normalized header match
+        const tier1Key = HEADER_KEY_MAP[rawHeader];
+        if (tier1Key) {
+            if (row[tier1Key] === undefined) row[tier1Key] = rawVal;
+            continue;
+        }
+        // Tier 2: strip all non-alphanumeric characters, lowercase
+        const canonical = rawHeader.replace(/[^a-z0-9]/g, '');
+        const tier2Key = CANONICAL_HEADER_MAP[canonical];
+        if (tier2Key && row[tier2Key] === undefined) {
+            row[tier2Key] = rawVal;
+        }
+        // Unrecognized columns are silently ignored (reported at file level)
     }
     return row;
+}
+
+/**
+ * Upfront header validation — runs BEFORE any row-level processing.
+ *
+ * Returns:
+ *   { ok: false, fatalError } when a required column cannot be found at all
+ *     (caller should abort with fatalError as a file-level error entry).
+ *   { ok: true, aliasMatches, extraColumns, missingOptional } otherwise;
+ *     caller should push these as FILE_INFO / FILE_WARNING entries (non-blocking).
+ *
+ * This is the key fix: previously a missing phone column produced one
+ * "Mobile Number is required" error per row. Now it produces exactly one
+ * FILE_STRUCTURE_ERROR with a clear explanation and the found/expected column
+ * lists, and row processing never runs.
+ */
+function validateFileHeaders(rawRows) {
+    if (!rawRows || rawRows.length === 0) {
+        return { ok: true, aliasMatches: [], extraColumns: [], missingOptional: [] };
+    }
+
+    // Collect unique original (un-normalized) header names from the first row.
+    const originalHeaders = Object.keys(rawRows[0]);
+    const normalizedToOriginal = new Map();
+    for (const h of originalHeaders) {
+        const norm = h.toLowerCase().trim().replace(/\r?\n/g, ' ').replace(/\s+/g, ' ');
+        if (!normalizedToOriginal.has(norm)) normalizedToOriginal.set(norm, h);
+    }
+
+    // Resolve which schema key each header maps to.
+    const resolvedKeys = new Map(); // schemaKey → originalHeader
+    const aliasMatches = []; // { originalHeader, schemaKey, schemaLabel } — for transparency
+    const unmappedHeaders = [];
+
+    for (const [norm, original] of normalizedToOriginal) {
+        // Tier 1
+        const tier1Key = HEADER_KEY_MAP[norm];
+        if (tier1Key) {
+            if (!resolvedKeys.has(tier1Key)) {
+                resolvedKeys.set(tier1Key, original);
+                // Report alias if original header differs from schema's canonical label
+                const canonicalLabel = SCHEMA_FIELD_LABELS[tier1Key];
+                if (canonicalLabel && original.trim() !== canonicalLabel) {
+                    aliasMatches.push({ originalHeader: original, schemaKey: tier1Key, schemaLabel: canonicalLabel });
+                }
+            }
+            continue;
+        }
+        // Tier 2
+        const canonical = norm.replace(/[^a-z0-9]/g, '');
+        const tier2Key = CANONICAL_HEADER_MAP[canonical];
+        if (tier2Key) {
+            if (!resolvedKeys.has(tier2Key)) {
+                resolvedKeys.set(tier2Key, original);
+                const canonicalLabel = SCHEMA_FIELD_LABELS[tier2Key];
+                if (canonicalLabel && original.trim() !== canonicalLabel) {
+                    aliasMatches.push({ originalHeader: original, schemaKey: tier2Key, schemaLabel: canonicalLabel });
+                }
+            }
+            continue;
+        }
+        unmappedHeaders.push(original);
+    }
+
+    // Check that every required column was found.
+    const missingRequired = [];
+    for (const key of REQUIRED_SCHEMA_KEYS) {
+        if (!resolvedKeys.has(key)) missingRequired.push(SCHEMA_FIELD_LABELS[key] || key);
+    }
+
+    if (missingRequired.length > 0) {
+        const foundList = originalHeaders.join(', ');
+        const expectedList = Object.values(SCHEMA_FIELD_LABELS).join(', ');
+        const fatalError = {
+            row: 0,
+            code: 'FILE_STRUCTURE_ERROR',
+            reason:
+                `This file doesn't match the Delivery Data template. ` +
+                `Missing required column: '${missingRequired.join("', '")}'. ` +
+                `Found columns: ${foundList}. ` +
+                `Expected columns: ${expectedList}. ` +
+                `Please download the current template and re-upload.`,
+        };
+        return { ok: false, fatalError };
+    }
+
+    // Identify extra (unrecognized) columns and missing optional columns.
+    const extraColumns = unmappedHeaders;
+    const missingOptional = Object.keys(SCHEMA_FIELD_LABELS)
+        .filter(k => !REQUIRED_SCHEMA_KEYS.has(k) && !resolvedKeys.has(k))
+        .map(k => SCHEMA_FIELD_LABELS[k]);
+
+    return { ok: true, aliasMatches, extraColumns, missingOptional };
 }
 
 // See rawDataProcessor.js for why this delegates to the shared flexible
@@ -131,6 +349,51 @@ export const processDeliveryDataJob = async (job) => {
                 [batchId, JSON.stringify(errors)]);
             await emitProgress(batchId, uploadedBy, verticalId, 'done', 0, 0, errors, 0);
             return;
+        }
+
+        // ── Upfront header validation ─────────────────────────────────────────
+        // Runs BEFORE any row-level processing. If the required phone column
+        // cannot be found, aborts immediately with a single clear file-level
+        // error rather than N confusing "Mobile Number is required" row errors.
+        const headerCheck = validateFileHeaders(rows);
+        if (!headerCheck.ok) {
+            // Single file-level error — stop here, zero rows processed.
+            errors.push(headerCheck.fatalError);
+            await query(`
+                UPDATE csv_upload_logs
+                SET status = 'done', success_count = 0, failed_count = 0, duplicate_count = 0,
+                    errors = $2, processing_finished_at = NOW()
+                WHERE id = $1
+            `, [batchId, JSON.stringify(errors)]);
+            await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, 0, errors, 0, 0);
+            return;
+        }
+        // Alias matches — transparent, non-blocking informational notices
+        for (const am of headerCheck.aliasMatches) {
+            errors.push({
+                row: 0,
+                code: 'ALIAS_MATCH',
+                reason: `Matched '${am.originalHeader}' → ${am.schemaLabel}`,
+                warning: true,
+            });
+        }
+        // Extra columns — informational, non-blocking
+        if (headerCheck.extraColumns.length > 0) {
+            errors.push({
+                row: 0,
+                code: 'FILE_WARNING',
+                reason: `Unrecognized columns ignored: ${headerCheck.extraColumns.join(', ')}`,
+                warning: true,
+            });
+        }
+        // Missing optional columns — informational
+        if (headerCheck.missingOptional.length > 0) {
+            errors.push({
+                row: 0,
+                code: 'FILE_WARNING',
+                reason: `Optional columns not found in file (will be blank): ${headerCheck.missingOptional.join(', ')}`,
+                warning: true,
+            });
         }
 
         const [agents, knownBusinessTypes] = await Promise.all([
