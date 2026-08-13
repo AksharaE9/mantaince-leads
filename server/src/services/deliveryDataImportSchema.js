@@ -194,9 +194,13 @@ export function resolveDeliveryDataSortColumn(sortBy) {
  * Builds additional WHERE clauses/params for delivery_data queries, on top
  * of the mandatory vertical_id/is_deleted clauses the caller already owns.
  * `startIdx` is the next free $N placeholder index.
+ *
+ * NOTE: The `delivery_data` table does not have a `sub_vertical_id` column
+ * (as it models event log data independent of sub-verticals), so subVerticalId
+ * is ignored here and cannot be filtered at the database level.
  */
 export function buildDeliveryDataFilters(queryParams, startIdx) {
-    const { assignedUserId, search, dateFrom, dateTo, businessType, city } = queryParams;
+    const { assignedUserId, search, dateFrom, dateTo, businessType, city, area } = queryParams;
     const clauses = [];
     const params = [];
     let idx = startIdx;
@@ -225,6 +229,10 @@ export function buildDeliveryDataFilters(queryParams, startIdx) {
     if (city && city.trim()) {
         clauses.push(`d.city ILIKE $${idx++}`);
         params.push(`%${city.trim()}%`);
+    }
+    if (area && area.trim()) {
+        clauses.push(`d.area ILIKE $${idx++}`);
+        params.push(`%${area.trim()}%`);
     }
 
     return { clauses, params, nextIdx: idx };

@@ -656,18 +656,60 @@ export const LeadsPage = () => {
       if (dateFromFilter) qParams.set('dateFrom', dateFromFilter);
       if (dateToFilter) qParams.set('dateTo', dateToFilter);
 
+      let filename = `leads-export-${activeVertical.slug || activeVertical._id}`;
+      const subVerticalObj = subVerticals.find(s => s._id === subVerticalFilter);
+      if (subVerticalObj) {
+        filename += `_${subVerticalObj.slug || subVerticalObj.name}`;
+      }
+      const activeFiltersCount = [statusFilter, subVerticalFilter, agentFilter, search, leadTypeFilter, dateFromFilter, dateToFilter].filter(Boolean).length;
+      if (activeFiltersCount > 0) {
+        filename += '_filtered';
+      }
+      filename += `_${new Date().toISOString().split('T')[0]}`;
+      const finalDownloadName = `${filename.replace(/[^a-zA-Z0-9_\-]/g, '_')}.csv`;
+
       const response = await axios.get(`/api/v1/leads/export/csv?${qParams.toString()}`, { responseType: 'blob' });
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.setAttribute('href', url);
-      link.setAttribute('download', `leads-export-${activeVertical.slug}-${Date.now()}.csv`);
+      link.setAttribute('download', finalDownloadName);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-    } catch {
-      toast.error('Failed to export CSV database.');
+
+      toast.success(`Successfully exported CSV: ${finalDownloadName}`);
+    } catch (err) {
+      console.error('Failed to export CSV database:', err);
+      let errorMsg = 'Failed to export CSV database';
+      let correlationId = '';
+
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          if (parsed.error) {
+            if (typeof parsed.error === 'object') {
+              errorMsg = parsed.error.message || errorMsg;
+              correlationId = parsed.error.correlationId || correlationId;
+            } else {
+              errorMsg = parsed.error;
+            }
+          }
+          if (parsed.correlationId) {
+            correlationId = parsed.correlationId;
+          }
+        } catch (e) {
+          // ignore parsing error, fallback to defaults
+        }
+      }
+
+      if (correlationId) {
+        toast.error(`${errorMsg} (ref: ${correlationId})`);
+      } else {
+        toast.error(errorMsg);
+      }
     }
   };
 

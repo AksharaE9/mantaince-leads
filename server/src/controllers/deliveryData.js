@@ -98,20 +98,31 @@ export const getDeliveryData = async (req, res) => {
  * Delivery Date/Delivery Time; never includes linkedRawDataId (it's not a
  * template/schema field — see deliveryDataImportSchema.js).
  */
+// One mapper per DELIVERY_DATA_FIELDS key (20 total: the 18 RAW_DATA_FIELDS
+// keys that map to delivery_data columns, plus deliveryDate and deliveryTime).
+// Every accessor uses `|| ''` so that a null DB value renders as an empty CSV
+// cell — not the string "null" — regardless of which fields are populated.
 const DELIVERY_DATA_EXPORT_MAPPERS = {
-    date: r => r.date_str,
-    employeeName: r => r.assignee_name,
-    businessType: r => r.business_type,
-    businessName: r => r.business_name,
-    area: r => r.area,
-    city: r => r.city,
-    phoneNumber: r => r.phone_number,
-    address: r => r.address,
-    appointmentDate: r => r.appointment_date_str,
-    appointmentTimings: r => r.appointment_timings,
-    remarks: r => r.remarks,
-    deliveryDate: r => r.delivery_date_str,
-    deliveryTime: r => r.delivery_time,
+    date:               r => r.date_str             || '',
+    employeeName:       r => r.assignee_name        || r.employee_name_raw || '',
+    productService:     r => r.business_type        || '',
+    leadName:           r => r.business_name        || '',
+    contactPerson:      r => r.contact_person       || '',
+    phoneNumber:        r => r.phone_number         || '',
+    alternateNumber:    r => r.alternate_number     || '',
+    city:               r => r.city                 || '',
+    area:               r => r.area                 || '',
+    mapLocation:        r => r.address              || '',
+    callStatus:         r => r.call_status          || '',
+    customerResponse:   r => r.customer_response    || '',
+    followUpRequired:   r => r.follow_up_required   || '',
+    followUpDate:       r => r.appointment_date_str || '',
+    followUpTime:       r => r.appointment_timings  || '',
+    nextAction:         r => r.next_action          || '',
+    remarks:            r => r.remarks              || '',
+    converted:          r => r.converted            || '',
+    deliveryDate:       r => r.delivery_date_str    || '',
+    deliveryTime:       r => r.delivery_time        || '',
 };
 
 export const exportDeliveryDataCsv = async (req, res) => {

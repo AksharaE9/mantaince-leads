@@ -65,6 +65,93 @@ const SORT_COLUMN_MAP = {
     status:        'l.status',
 };
 
+export const buildCostConversionsFilters = (queryParams, startIdx) => {
+    const {
+        subVerticalId,
+        status,
+        area,
+        assignedTo,
+        search,
+        dateFrom,
+        dateTo,
+        csvBatchId,
+        leadType,
+        stageId,
+        followUpDate,
+    } = queryParams;
+
+    const wheres = [];
+    const params = [];
+    let pIdx = startIdx;
+
+    if (subVerticalId && isValidUUID(subVerticalId)) {
+        wheres.push(`l.sub_vertical_id = $${pIdx++}`);
+        params.push(subVerticalId);
+    }
+    if (status) {
+        wheres.push(`l.status = $${pIdx++}`);
+        params.push(status);
+    }
+    if (assignedTo && isValidUUID(assignedTo)) {
+        wheres.push(`l.assigned_to = $${pIdx++}`);
+        params.push(assignedTo);
+    }
+    if (area) {
+        wheres.push(`l.data->>'area' = $${pIdx++}`);
+        params.push(area);
+    }
+    if (dateFrom) {
+        wheres.push(`l.created_at >= $${pIdx++}`);
+        params.push(dateFrom);
+    }
+    if (dateTo) {
+        wheres.push(`l.created_at <= $${pIdx++}`);
+        params.push(dateTo);
+    }
+    if (csvBatchId && isValidUUID(csvBatchId)) {
+        wheres.push(`l.csv_batch_id = $${pIdx++}`);
+        params.push(csvBatchId);
+    }
+    if (leadType) {
+        wheres.push(`l.lead_type = $${pIdx++}`);
+        params.push(leadType);
+    } else {
+        wheres.push(`l.lead_type != 'POSITIVE'`);
+    }
+    if (stageId && isValidUUID(stageId)) {
+        wheres.push(`l.stage_id = $${pIdx++}`);
+        params.push(stageId);
+    }
+    if (followUpDate) {
+        wheres.push(`EXISTS (
+            SELECT 1 FROM follow_ups f 
+            WHERE f.cost_conversion_id = l.id 
+              AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $${pIdx++}::date
+        )`);
+        params.push(followUpDate);
+    }
+
+    if (search && search.trim().length >= 2) {
+        const q = search.trim();
+        const tsWords = q.split(/\s+/)
+            .map(w => w.replace(/[&|!():*']/g, ''))
+            .filter(Boolean);
+        if (tsWords.length > 0 && (q.includes(' ') || q.length >= 4)) {
+            const tsQuery = tsWords.map(w => `${w}:*`).join(' & ');
+            wheres.push(`l.search_vector @@ to_tsquery('english', $${pIdx++})`);
+            params.push(tsQuery);
+        } else {
+            wheres.push(
+                `(l.name ILIKE $${pIdx} OR l.business_name ILIKE $${pIdx} OR l.phone ILIKE $${pIdx})`
+            );
+            params.push(`%${q}%`);
+            pIdx++;
+        }
+    }
+
+    return { wheres, params, nextIdx: pIdx };
+};
+
 /**
  * GET /cost-conversions
  */
@@ -114,80 +201,10 @@ export const getCostConversions = async (req, res) => {
         // Rows flagged 'duplicate_removed' or 'promoted_removed' are soft-hidden
         // from normal listing — reversible by clearing those columns, never hard-deleted.
         const wheres  = ['l.vertical_id = $1', 'l.is_deleted = false', "(l.duplicate_status IS NULL OR l.duplicate_status NOT IN ('duplicate_removed', 'promoted_removed'))"];
-        let   pIdx    = 2;
-
-
-
-        if (subVerticalId && isValidUUID(subVerticalId)) {
-            wheres.push(`l.sub_vertical_id = $${pIdx++}`);
-            params.push(subVerticalId);
-        }
-        if (status) {
-            wheres.push(`l.status = $${pIdx++}`);
-            params.push(status);
-        }
-        if (assignedTo && isValidUUID(assignedTo)) {
-            wheres.push(`l.assigned_to = $${pIdx++}`);
-            params.push(assignedTo);
-        }
-        if (area) {
-            wheres.push(`l.data->>'area' = $${pIdx++}`);
-            params.push(area);
-        }
-        if (dateFrom) {
-            wheres.push(`l.created_at >= $${pIdx++}`);
-            params.push(dateFrom);
-        }
-        if (dateTo) {
-            wheres.push(`l.created_at <= $${pIdx++}`);
-            params.push(dateTo);
-        }
-        if (csvBatchId && isValidUUID(csvBatchId)) {
-            wheres.push(`l.csv_batch_id = $${pIdx++}`);
-            params.push(csvBatchId);
-        }
-        if (leadType) {
-            wheres.push(`l.lead_type = $${pIdx++}`);
-            params.push(leadType);
-        } else {
-            wheres.push(`l.lead_type != 'POSITIVE'`);
-        }
-        if (stageId && isValidUUID(stageId)) {
-            wheres.push(`l.stage_id = $${pIdx++}`);
-            params.push(stageId);
-        }
-        if (followUpDate) {
-            wheres.push(`EXISTS (
-                SELECT 1 FROM follow_ups f 
-                WHERE f.cost_conversion_id = l.id 
-                  AND DATE(f.follow_up_date AT TIME ZONE 'Asia/Kolkata') = $${pIdx++}::date
-            )`);
-            params.push(followUpDate);
-        }
-
-        // ── Full-text search vs. ILIKE fallback ───────────────────────────
-        if (search && search.trim().length >= 2) {
-            const q = search.trim();
-            // L2: strip tsquery special syntax characters from each word
-            // before appending `:*` — otherwise a search term containing
-            // &, |, !, (, ), *, or ' produces a to_tsquery syntax error that
-            // surfaces as a raw 500. Normal alphanumeric searches are
-            // untouched by this.
-            const tsWords = q.split(/\s+/)
-                .map(w => w.replace(/[&|!():*']/g, ''))
-                .filter(Boolean);
-            if (tsWords.length > 0 && (q.includes(' ') || q.length >= 4)) {
-                const tsQuery = tsWords.map(w => `${w}:*`).join(' & ');
-                wheres.push(`l.search_vector @@ to_tsquery('english', $${pIdx++})`);
-                params.push(tsQuery);
-            } else {
-                wheres.push(
-                    `(l.name ILIKE $${pIdx} OR l.business_name ILIKE $${pIdx} OR l.phone ILIKE $${pIdx})`
-                );
-                params.push(`%${q}%`);
-                pIdx++;
-            }
-        }
+        const filters = buildCostConversionsFilters(req.query, 2);
+        wheres.push(...filters.wheres);
+        params.push(...filters.params);
+        let pIdx = filters.nextIdx;
 
         // ── Cursor-based pagination WHERE clause ──────────────────────────
         let cursorData = null;
@@ -885,6 +902,14 @@ export const exportCostConversionsCsv = async (req, res) => {
 
     // Build query — same projection as before, cursor-friendly
     const params = [verticalId];
+    const wheres = ['l.vertical_id = $1', 'l.is_deleted = false', "(l.duplicate_status IS NULL OR l.duplicate_status NOT IN ('duplicate_removed', 'promoted_removed'))"];
+    const filters = buildCostConversionsFilters(req.query, 2);
+    wheres.push(...filters.wheres);
+    params.push(...filters.params);
+
+    const sortCol = ['createdAt', 'updatedAt', 'businessName', 'name', 'status'].includes(req.query.sortBy) ? SORT_COLUMN_MAP[req.query.sortBy] : 'l.created_at';
+    const dir = req.query.sortDir === 'asc' ? 'ASC' : 'DESC';
+
     let sql = `
         SELECT
             l.name, l.phone, l.business_name,
@@ -892,17 +917,9 @@ export const exportCostConversionsCsv = async (req, res) => {
             u.name  AS assignee_name
         FROM cost_conversions l
         LEFT JOIN users u ON u.id = l.assigned_to
-        WHERE l.vertical_id = $1 AND l.is_deleted = false
+        WHERE ${wheres.join(' AND ')}
+        ORDER BY ${sortCol} ${dir}
     `;
-
-    const leadTypeIdx = params.length + 1;
-    if (leadType) {
-        sql += ` AND l.lead_type = $${leadTypeIdx}`;
-        params.push(leadType);
-    } else {
-        sql += ` AND l.lead_type != 'POSITIVE'`;
-    }
-    sql += ` ORDER BY l.created_at DESC`;
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=cost-conversions-export-${Date.now()}.csv`);

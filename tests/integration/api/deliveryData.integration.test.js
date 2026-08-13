@@ -58,14 +58,15 @@ describe('Delivery Data API', () => {
     });
 
     describe('GET /api/v1/delivery-data/schema and /import-template — shared schema, dynamic template', () => {
-        it('exposes the 13-field schema (11 shared Raw Data fields + Delivery Date/Delivery Time)', async () => {
+        it('exposes the 20-field schema (18 shared Raw Data fields + Delivery Date/Delivery Time)', async () => {
             const res = await request(app)
                 .get('/api/v1/delivery-data/schema')
                 .set('Authorization', `Bearer ${adminToken}`)
                 .expect(200);
             expect(res.body.data.fields.map(f => f.key)).toEqual([
-                'date', 'employeeName', 'businessType', 'businessName', 'area', 'city',
-                'phoneNumber', 'address', 'appointmentDate', 'appointmentTimings', 'remarks',
+                'date', 'employeeName', 'productService', 'leadName', 'contactPerson', 'phoneNumber',
+                'alternateNumber', 'city', 'area', 'mapLocation', 'callStatus', 'customerResponse',
+                'followUpRequired', 'followUpDate', 'followUpTime', 'nextAction', 'remarks', 'converted',
                 'deliveryDate', 'deliveryTime',
             ]);
         });
@@ -96,14 +97,15 @@ describe('Delivery Data API', () => {
             expect(res.body.length).toBeGreaterThan(0);
         });
 
-        it('regression: /api/v1/raw-data/schema is unaffected and still returns exactly its original 11 fields', async () => {
+        it('regression: /api/v1/raw-data/schema is unaffected and still returns exactly its original 18 fields', async () => {
             const res = await request(app)
                 .get('/api/v1/raw-data/schema')
                 .set('Authorization', `Bearer ${adminToken}`)
                 .expect(200);
             expect(res.body.data.fields.map(f => f.key)).toEqual([
-                'date', 'employeeName', 'businessType', 'businessName', 'area', 'city',
-                'phoneNumber', 'address', 'appointmentDate', 'appointmentTimings', 'remarks',
+                'date', 'employeeName', 'productService', 'leadName', 'contactPerson', 'phoneNumber',
+                'alternateNumber', 'city', 'area', 'mapLocation', 'callStatus', 'customerResponse',
+                'followUpRequired', 'followUpDate', 'followUpTime', 'nextAction', 'remarks', 'converted',
             ]);
         });
     });
@@ -187,6 +189,38 @@ describe('Delivery Data API', () => {
             const header = res.text.split('\n')[0];
             expect(header).toContain('Delivery Date');
             expect(header).toContain('Delivery Time');
+        });
+
+        it('exports a CSV containing null employee assignments and null optional fields, asserting clean rendering', async () => {
+            const cleanPhone = `999${Date.now().toString().slice(-7)}`;
+            await request(app)
+                .post('/api/v1/delivery-data')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                    verticalId,
+                    phoneNumber: cleanPhone,
+                    date: null,
+                    employeeName: null,
+                    businessName: null,
+                    deliveryDate: null,
+                    deliveryTime: null,
+                })
+                .expect(201);
+
+            const res = await request(app)
+                .get(`/api/v1/delivery-data/export/csv?verticalId=${verticalId}&search=${cleanPhone}`)
+                .set('Authorization', `Bearer ${adminToken}`)
+                .expect(200);
+
+            expect(res.headers['content-type']).toContain('text/csv');
+            expect(res.text).toContain(cleanPhone);
+            
+            const lines = res.text.trim().split('\n');
+            const dataLine = lines.find(line => line.includes(cleanPhone));
+            expect(dataLine).toBeDefined();
+            
+            // Check that the null values are rendered as empty strings (i.e. "") and never "null"
+            expect(dataLine.toLowerCase()).not.toContain('"null"');
         });
     });
 
