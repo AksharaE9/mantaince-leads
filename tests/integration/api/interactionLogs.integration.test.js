@@ -151,28 +151,33 @@ describe('Interaction Logs & Bulk Follow-up imports', () => {
         const batchId = uploadRes.body.data.batchId;
         expect(batchId).toBeDefined();
 
-        // Run the job processing inline if in local/test environment using the mock job runner
-        // Since Vercel logic is checked via VERCEL env var, in test it's stored on disk / queued.
-        // Let's process the job manually:
-        const fileLog = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
-        const filePath = `./server/uploads/${fileLog.file_name}`;
-        const buffer = fs.readFileSync(filePath);
-        
-        const mockJob = {
-            data: {
-                batchId,
-                fileBufferBase64: buffer.toString('base64'),
-                verticalId,
-                subVerticalId,
-                uploadedBy: agentId,
-                leadType: 'CALL',
-                fileExt: '.csv'
-            },
-            progress: async () => {}
-        };
-
-        const { processCsvJob } = await import('../../../server/src/jobs/csvProcessor.js');
-        await processCsvJob(mockJob);
+        let logRow = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
+        const filePath = `./server/uploads/${logRow.file_name}`;
+        if (logRow.status === 'queued') {
+            await query("UPDATE csv_upload_logs SET status = 'processing' WHERE id = $1", [batchId]);
+            const buffer = fs.readFileSync(filePath);
+            const mockJob = {
+                data: {
+                    batchId,
+                    fileBufferBase64: buffer.toString('base64'),
+                    verticalId,
+                    subVerticalId,
+                    uploadedBy: agentId,
+                    leadType: 'CALL',
+                    fileExt: '.csv'
+                },
+                progress: async () => {}
+            };
+            const { processCsvJob } = await import('../../../server/src/jobs/csvProcessor.js');
+            await processCsvJob(mockJob);
+        } else {
+            // Wait for background worker
+            for (let k = 0; k < 30; k++) {
+                logRow = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
+                if (logRow.status === 'done' || logRow.status === 'failed') break;
+                await new Promise(r => setTimeout(r, 500));
+            }
+        }
 
         // Fetch the created lead
         const leadDbRes = await query('SELECT id FROM cost_conversions WHERE phone = $1 AND vertical_id = $2 AND is_deleted = false', ['9991113333', verticalId]);
@@ -215,25 +220,33 @@ describe('Interaction Logs & Bulk Follow-up imports', () => {
         const batchId = uploadRes.body.data.batchId;
         expect(batchId).toBeDefined();
 
-        const fileLog = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
-        const filePath = `./server/uploads/${fileLog.file_name}`;
-        const buffer = fs.readFileSync(filePath);
-
-        const mockJob = {
-            data: {
-                batchId,
-                fileBufferBase64: buffer.toString('base64'),
-                verticalId,
-                subVerticalId,
-                uploadedBy: agentId,
-                leadType: 'CALL',
-                fileExt: '.csv'
-            },
-            progress: async () => {}
-        };
-
-        const { processInteractionLogJob } = await import('../../../server/src/jobs/interactionLogProcessor.js');
-        await processInteractionLogJob(mockJob);
+        let logRow = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
+        const filePath = `./server/uploads/${logRow.file_name}`;
+        if (logRow.status === 'queued') {
+            await query("UPDATE csv_upload_logs SET status = 'processing' WHERE id = $1", [batchId]);
+            const buffer = fs.readFileSync(filePath);
+            const mockJob = {
+                data: {
+                    batchId,
+                    fileBufferBase64: buffer.toString('base64'),
+                    verticalId,
+                    subVerticalId,
+                    uploadedBy: agentId,
+                    leadType: 'CALL',
+                    fileExt: '.csv'
+                },
+                progress: async () => {}
+            };
+            const { processInteractionLogJob } = await import('../../../server/src/jobs/interactionLogProcessor.js');
+            await processInteractionLogJob(mockJob);
+        } else {
+            // Wait for background worker
+            for (let k = 0; k < 30; k++) {
+                logRow = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
+                if (logRow.status === 'done' || logRow.status === 'failed') break;
+                await new Promise(r => setTimeout(r, 500));
+            }
+        }
 
         // Fetch logs for the existing lead
         const logsRes = await query('SELECT * FROM lead_interaction_logs WHERE lead_id = $1 AND source = $2', [leadId, 'bulk_upload']);

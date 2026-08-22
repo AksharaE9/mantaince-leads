@@ -24,9 +24,9 @@ export const getUsersBySubVertical = async (req, res) => {
           -- Super admins always appear
           r.name = 'super_admin'
           OR
-          -- Vertical admins who have access to the parent vertical
+          -- Vertical admins and standard agents who have access to the parent vertical
           (
-            r.name = 'vertical_admin'
+            (r.name = 'vertical_admin' OR r.name = 'agent')
             AND $1::uuid IN (
               SELECT sv2.id FROM sub_verticals sv2
               WHERE sv2.vertical_id = ANY(u.vertical_access)
