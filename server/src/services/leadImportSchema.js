@@ -1,6 +1,7 @@
 import { query } from '../config/db.js';
 import { withCache } from './cache.js';
 import { CacheKeys, TTL } from '../lib/cacheKeys.js';
+import { FOLLOWUP_APPEND_FIELDS } from './interactionLogImportSchema.js';
 
 /**
  * Single source of truth for the lead-import field set.
@@ -38,38 +39,18 @@ export const BASE_FIELDS_CALL = [
     { key: 'employeeName', label: 'Employee Name', csvHeader: 'EMPLOYEE NAME', type: 'string', required: false },
     { key: 'businessType', label: 'Business Type', csvHeader: 'BUSINESS TYPE', type: 'string', required: false },
     { key: 'businessName', label: 'Business / Person / Shop / Company Name', csvHeader: 'BUSINESS / PERSON / SHOP / COMPANY NAME', type: 'string', required: false, maxLength: 255 },
-    { key: 'phone', label: 'Contact Number', csvHeader: 'CONTACT NUMBER', type: 'phone', required: true, unique: true },
-    { key: 'pointOfContact', label: 'Point of Contact', csvHeader: 'POINT OF CONTACT', type: 'string', required: false },
     { key: 'area', label: 'Area', csvHeader: 'AREA', type: 'string', required: false },
     { key: 'city', label: 'City', csvHeader: 'CITY', type: 'string', required: false },
-    { key: 'deliveredLocation', label: 'Link Address', csvHeader: 'LINK ADDRESS', type: 'string', required: false },
+    { key: 'phone', label: 'Contact Number', csvHeader: 'CONTACT', type: 'phone', required: true, unique: true },
+    { key: 'deliveredLocation', label: 'Map Location Link / Address', csvHeader: 'MAP LOCATION LINK / ADDRESS', type: 'string', required: false },
+    { key: 'requirement', label: 'Requirement', csvHeader: 'REQUIREMENT', type: 'string', required: false },
     { key: 'remarks', label: 'Remarks', csvHeader: 'REMARKS', type: 'string', required: false },
-    { key: 'recordings', label: 'Recordings', csvHeader: 'RECORDINGS', type: 'string', required: false },
-    { key: 'appointmentType', label: 'Appointment Type (Yes or No)', csvHeader: 'APPOINTMENT TYPE (YES OR NO)', type: 'enum', options: ['Yes', 'No'], required: false },
-    { key: 'appointmentDate', label: 'Appointment Date', csvHeader: 'APPOINTMENT DATE', type: 'string', required: false },
-    { key: 'appointmentTime', label: 'Appointment Time', csvHeader: 'APPOINTMENT TIME', type: 'string', required: false },
-    { key: 'requirement', label: 'Requirement Order if Any', csvHeader: 'REQUIREMENT ORDER IF ANY', type: 'string', required: false },
-    { key: 'notes', label: 'Notes to the COS if Any', csvHeader: 'NOTES TO THE COS IF ANY', type: 'string', required: false },
+    { key: 'followUpRequired', label: 'Follow Up Require (Yes/No)', csvHeader: 'FOLLOW UP REQUIRE (YES/NO)', type: 'enum', options: ['Yes', 'No'], required: false },
+    { key: 'followUpDate', label: 'Follow Up Date', csvHeader: 'FOLLOW UP DATE', type: 'string', required: false },
+    { key: 'followUpRemarks', label: 'Follow Up Remarks', csvHeader: 'FOLLOW UP REMARKS', type: 'string', required: false },
 ];
 
-export const BASE_FIELDS_POSITIVE = [
-    { key: 'date', label: 'Date', csvHeader: 'DATE', type: 'string', required: false },
-    { key: 'employeeName', label: 'Employee Name', csvHeader: 'EMPLOYEE NAME', type: 'string', required: false },
-    { key: 'businessType', label: 'Business Type', csvHeader: 'BUSINESS TYPE', type: 'string', required: false },
-    { key: 'businessName', label: 'Business / Person / Shop / Company Name', csvHeader: 'BUSINESS / PERSON / SHOP / COMPANY NAME', type: 'string', required: false, maxLength: 255 },
-    { key: 'area', label: 'Area', csvHeader: 'AREA', type: 'string', required: false },
-    { key: 'city', label: 'City', csvHeader: 'CITY', type: 'string', required: false },
-    { key: 'phone', label: 'Contact Number', csvHeader: 'CONTACT NUMBER', type: 'phone', required: true, unique: true },
-    { key: 'pointOfContact', label: 'Point of Contact', csvHeader: 'POINT OF CONTACT', type: 'string', required: false },
-    { key: 'remarks', label: 'Remarks', csvHeader: 'REMARKS', type: 'string', required: false },
-    { key: 'recordings', label: 'Recordings', csvHeader: 'RECORDINGS', type: 'string', required: false },
-    { key: 'followUpRequired', label: 'Follow-Up Required', csvHeader: 'FOLLOW-UP REQUIRED', type: 'enum', options: ['Yes', 'No'], required: false },
-    { key: 'followUps', label: 'Follow-Ups', csvHeader: 'FOLLOW-UPS', type: 'string', required: false },
-    { key: 'followUpDates', label: 'Follow-Up Dates', csvHeader: 'FOLLOW-UP DATES', type: 'string', required: false },
-    { key: 'followUpRemarks', label: 'Follow-Up Remarks', csvHeader: 'FOLLOW-UP REMARKS', type: 'string', required: false },
-    { key: 'requirement', label: 'Requirement if Any', csvHeader: 'REQUIREMENT IF ANY', type: 'string', required: false },
-    { key: 'notes', label: 'A Notes to the COS Team Only', csvHeader: 'A NOTES TO THE COS TEAM ONLY', type: 'string', required: false },
-];
+export const BASE_FIELDS_POSITIVE = [...BASE_FIELDS_CALL];
 
 // field_configs.field_type values (see CreateFieldConfigBody in validators/index.js)
 // that carry a fixed option list and should render as a dropdown in the template.
@@ -110,7 +91,7 @@ export async function getLeadImportSchema(verticalId, leadType = 'CALL') {
         })
         .filter(f => f.csvHeader && !baseHeaderSet.has(f.csvHeader));
 
-    return [...baseFields, ...customFields];
+    return [...baseFields, ...customFields, ...FOLLOWUP_APPEND_FIELDS];
 }
 
 /**

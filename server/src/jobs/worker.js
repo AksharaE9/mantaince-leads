@@ -2,6 +2,7 @@ import { connectDB, query } from '../config/db.js';
 import { processCsvJob } from './csvProcessor.js';
 import { processRawDataJob } from './rawDataProcessor.js';
 import { processDeliveryDataJob } from './deliveryDataProcessor.js';
+import { processInteractionLogJob } from './interactionLogProcessor.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -73,6 +74,8 @@ async function startImportWorkerLoop() {
         await processRawDataJob(mockJob);
       } else if (log.entity_type === 'delivery_data') {
         await processDeliveryDataJob(mockJob);
+      } else if (log.entity_type === 'interaction_log') {
+        await processInteractionLogJob(mockJob);
       } else {
         await processCsvJob(mockJob);
       }

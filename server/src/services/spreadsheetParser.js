@@ -112,16 +112,38 @@ async function parseXlsxBuffer(buffer) {
         warnings.push(`The file contains ${workbook.worksheets.length} sheets — only the first sheet ("${sheet.name}") was imported.`);
     }
 
-    const headers = [];
+    let headers = [];
     const headerRow = sheet.getRow(1);
-    const maxCol = headerRow.cellCount || sheet.columnCount;
+    const maxCol = Math.max(headerRow.cellCount || 0, sheet.columnCount || 0);
     for (let c = 1; c <= maxCol; c++) {
         headers.push(cellToString(headerRow.getCell(c).value));
     }
 
+    // Header detection: check if first row contains actual keywords or data
+    const isHeaderRow = headers.some(h => {
+        const hs = String(h).toLowerCase();
+        return hs.includes('date') || hs.includes('employee') || hs.includes('name') || 
+               hs.includes('business') || hs.includes('contact') || hs.includes('phone') || 
+               hs.includes('mobile') || hs.includes('area') || hs.includes('city') || 
+               hs.includes('address') || hs.includes('remarks') || hs.includes('requirement');
+    });
+
+    const standardHeaders = [
+        'DATE', 'EMPLOYEE NAME', 'BUSINESS TYPE', 'BUSINESS / PERSON / SHOP / COMPANY NAME',
+        'AREA', 'CITY', 'CONTACT', 'MAP LOCATION LINK / ADDRESS',
+        'REQUIREMENT', 'REMARKS', 'FOLLOW UP REQUIRE (YES/NO)', 'FOLLOW UP DATE', 'FOLLOW UP REMARKS'
+    ];
+
+    let startRow = 2;
+    if (!isHeaderRow && maxCol >= 6) {
+        headers = standardHeaders;
+        startRow = 1;
+        warnings.push('No header row detected in template — automatically mapped by column order.');
+    }
+
     const rows = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-        if (rowNumber === 1) return;
+        if (rowNumber < startRow) return;
         const obj = {};
         let hasValue = false;
         headers.forEach((h, i) => {
@@ -155,14 +177,47 @@ export async function parseUploadBuffer(buffer, fileExt) {
         return { rows, warnings };
     }
 
-    // csv-parse strips a leading UTF-8 BOM and handles both \n and \r\n line endings natively.
-    // Headers keep their original casing here too (see xlsx branch above) —
-    // normalizeRowKeys() downstream does the case-insensitive matching.
-    const rows = parse(buffer, { columns: true, trim: true, skip_empty_lines: true, bom: true });
+    // Parse CSV with auto-headerless detection
+    const records = parse(buffer, { columns: false, trim: true, skip_empty_lines: true, bom: true });
+    if (records.length === 0) return { rows: [], warnings: [] };
+
+    let headers = records[0];
+    const maxCol = headers.length;
+    const isHeaderRow = headers.some(h => {
+        const hs = String(h).toLowerCase();
+        return hs.includes('date') || hs.includes('employee') || hs.includes('name') || 
+               hs.includes('business') || hs.includes('contact') || hs.includes('phone') || 
+               hs.includes('mobile') || hs.includes('area') || hs.includes('city') || 
+               hs.includes('address') || hs.includes('remarks') || hs.includes('requirement');
+    });
+
+    const standardHeaders = [
+        'DATE', 'EMPLOYEE NAME', 'BUSINESS TYPE', 'BUSINESS / PERSON / SHOP / COMPANY NAME',
+        'AREA', 'CITY', 'CONTACT', 'MAP LOCATION LINK / ADDRESS',
+        'REQUIREMENT', 'REMARKS', 'FOLLOW UP REQUIRE (YES/NO)', 'FOLLOW UP DATE', 'FOLLOW UP REMARKS'
+    ];
+
+    let startIdx = 1;
+    const warnings = [];
+    if (!isHeaderRow && maxCol >= 6) {
+        headers = standardHeaders;
+        startIdx = 0;
+        warnings.push('No header row detected in template — automatically mapped by column order.');
+    }
+
+    const rows = [];
+    for (let i = startIdx; i < records.length; i++) {
+        const obj = {};
+        headers.forEach((h, colIdx) => {
+            if (h) obj[h] = records[i][colIdx] || '';
+        });
+        rows.push(obj);
+    }
+
     if (rows.length > MAX_ROWS) {
         throw Object.assign(new Error(`File has ${rows.length} rows, which exceeds the ${MAX_ROWS.toLocaleString()} row limit. Please split it into smaller files.`), { status: 400 });
     }
-    return { rows, warnings: [] };
+    return { rows, warnings };
 }
 
 export default parseUploadBuffer;

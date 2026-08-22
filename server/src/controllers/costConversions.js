@@ -133,13 +133,22 @@ export const buildCostConversionsFilters = (queryParams, startIdx) => {
 
     if (search && search.trim().length >= 2) {
         const q = search.trim();
-        const tsWords = q.split(/\s+/)
-            .map(w => w.replace(/[&|!():*']/g, ''))
-            .filter(Boolean);
-        if (tsWords.length > 0 && (q.includes(' ') || q.length >= 4)) {
-            const tsQuery = tsWords.map(w => `${w}:*`).join(' & ');
-            wheres.push(`l.search_vector @@ to_tsquery('english', $${pIdx++})`);
-            params.push(tsQuery);
+        const isNumeric = /^[+\d\s\-()]+$/.test(q);
+        if (!isNumeric && q.length >= 4) {
+            const tsWords = q.split(/\s+/)
+                .map(w => w.replace(/[&|!():*']/g, ''))
+                .filter(Boolean);
+            if (tsWords.length > 0) {
+                const tsQuery = tsWords.map(w => `${w}:*`).join(' & ');
+                wheres.push(`l.search_vector @@ to_tsquery('english', $${pIdx++})`);
+                params.push(tsQuery);
+            } else {
+                wheres.push(
+                    `(l.name ILIKE $${pIdx} OR l.business_name ILIKE $${pIdx} OR l.phone ILIKE $${pIdx})`
+                );
+                params.push(`%${q}%`);
+                pIdx++;
+            }
         } else {
             wheres.push(
                 `(l.name ILIKE $${pIdx} OR l.business_name ILIKE $${pIdx} OR l.phone ILIKE $${pIdx})`
@@ -489,12 +498,14 @@ export const getCostConversionById = async (req, res) => {
                 u.id    AS assignee_id,
                 u.name  AS assignee_name,
                 u.email AS assignee_email,
+                u2.name AS uploaded_by_name,
                 sv.id   AS sv_id,
                 sv.name AS sv_name,
                 v.name  AS vertical_name,
                 v.color AS vertical_color
             FROM cost_conversions l
             LEFT JOIN users         u  ON u.id  = l.assigned_to
+            LEFT JOIN users         u2 ON u2.id = l.uploaded_by
             LEFT JOIN sub_verticals sv ON sv.id = l.sub_vertical_id
             LEFT JOIN verticals     v  ON v.id  = l.vertical_id
             WHERE l.id = $1
@@ -503,6 +514,12 @@ export const getCostConversionById = async (req, res) => {
         const lead = res2.rows[0];
         if (!lead || lead.is_deleted) {
             return res.status(404).json({ success: false, error: 'Cost/Conversion not found' });
+        }
+
+        if (lead.uploaded_by_name) {
+            lead.uploadedBy = { name: lead.uploaded_by_name };
+        } else {
+            lead.uploadedBy = null;
         }
 
         const customValuesRes = await query(`

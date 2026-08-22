@@ -182,6 +182,9 @@ const checkSchemaReady = async () => {
             ) AND EXISTS (
                 SELECT 1 FROM pg_trigger
                 WHERE tgname = 'trg_refresh_vertical_stats_on_lead_insert'
+            ) AND EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'lead_interaction_logs'
             ) AS ready;
         `);
         return res.rows[0]?.ready || false;
@@ -764,6 +767,33 @@ const runMigrations = async () => {
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_realtime_events_id ON realtime_events(id);
+
+        -- Interaction history log: per-lead interaction notes appended over time.
+        -- Distinct from follow_ups (a future scheduled task queue) and audit_logs
+        -- (a system event trail). This table stores retroactive interaction records
+        -- created via single-add on the detail page OR bulk upload (main template
+        -- optional columns + dedicated follow-ups-only template).
+        -- section discriminator: 'cos' | 'positives' — schema is generic so Raw
+        -- Data can be added later without a migration.
+        CREATE TABLE IF NOT EXISTS lead_interaction_logs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            lead_id UUID NOT NULL REFERENCES cost_conversions(id) ON DELETE CASCADE,
+            section VARCHAR(30) NOT NULL DEFAULT 'cos',
+            interaction_date DATE NOT NULL,
+            interaction_time VARCHAR(50),
+            remarks TEXT,
+            outcome VARCHAR(50),
+            next_followup_date DATE,
+            recorded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            recorded_by_raw_name VARCHAR(255),
+            source VARCHAR(30) NOT NULL DEFAULT 'single_add',
+            csv_batch_id UUID REFERENCES csv_upload_logs(id) ON DELETE SET NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_lead_interaction_logs_lead_date ON lead_interaction_logs(lead_id, interaction_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_lead_interaction_logs_batch ON lead_interaction_logs(csv_batch_id);
+        CREATE INDEX IF NOT EXISTS idx_lead_interaction_logs_date ON lead_interaction_logs(interaction_date);
     `;
 
     // ── Phase 2: Performance Indexes ─────────────────────────────────────────

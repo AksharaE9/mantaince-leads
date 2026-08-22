@@ -40,12 +40,25 @@ export const LeadDetailPage = () => {
   const [stages, setStages] = useState([]);
   const [subVerticalUsers, setSubVerticalUsers] = useState([]);
 
-  // Follow-ups state
+  // Follow-ups state (scheduled check-in tasks)
   const [followUps, setFollowUps] = useState([]);
   const [followUpSummary, setFollowUpSummary] = useState(null);
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [completingFollowUpId, setCompletingFollowUpId] = useState(null);
   const [completedNote, setCompletedNote] = useState('');
+
+  // Interaction log state (retroactive interaction history)
+  const [interactionLogs, setInteractionLogs] = useState([]);
+  const [interactionCount, setInteractionCount] = useState(0);
+  const [showAddInteraction, setShowAddInteraction] = useState(false);
+  const [savingInteraction, setSavingInteraction] = useState(false);
+  const [interactionForm, setInteractionForm] = useState({
+    interactionDate: new Date().toISOString().split('T')[0],
+    interactionTime: '',
+    remarks: '',
+    outcome: '',
+    nextFollowupDate: '',
+  });
 
   // Geotagging manual coordinate overrides
   const [capturingGps, setCapturingGps] = useState(false);
@@ -60,16 +73,20 @@ export const LeadDetailPage = () => {
   const fetchLeadDetail = async (shouldResetForm = true) => {
     try {
       // 1. Fetch Lead details and follow-ups in parallel (the first level of the waterfall)
-      const [leadRes, followUpsRes, summaryRes] = await Promise.all([
+      const [leadRes, followUpsRes, summaryRes, interactionLogsRes] = await Promise.all([
         axios.get(`/api/v1/leads/${id}`),
         axios.get(`/api/v1/followUps/leads/${id}/follow-ups`),
-        axios.get(`/api/v1/followUps/leads/${id}/follow-ups/summary`)
+        axios.get(`/api/v1/followUps/leads/${id}/follow-ups/summary`),
+        axios.get(`/api/v1/interactionLogs/leads/${id}/interaction-logs`),
       ]);
       
       const leadData = leadRes.data.data;
       setLead(leadData);
       setFollowUps(followUpsRes.data.data || []);
       setFollowUpSummary(summaryRes.data.data || null);
+      const logs = interactionLogsRes.data.data || [];
+      setInteractionLogs(logs);
+      setInteractionCount(logs.length);
       
       // 2. Fetch all dropdowns, custom fields, stages, and sub-vertical users in a single parallel block
       const subId = leadData.sub_vertical_id;
@@ -339,11 +356,51 @@ export const LeadDetailPage = () => {
       toast.success('Follow-up canceled.');
       fetchLeadDetail(false);
     } catch (err) {
-      toast.error('Failed to cancel check-in');
+      toast.error(err.response?.data?.error || 'Failed to cancel follow-up');
+    }
+  };
+
+  // ── Interaction log handlers ───────────────────────────────────────────────
+  const handleCreateInteractionLog = async (e) => {
+    e.preventDefault();
+    if (!interactionForm.interactionDate) {
+      toast.error('Interaction date is required.');
+      return;
+    }
+    setSavingInteraction(true);
+    try {
+      await axios.post(`/api/v1/interactionLogs/leads/${id}/interaction-logs`, interactionForm);
+      toast.success('Interaction logged successfully.');
+      setShowAddInteraction(false);
+      setInteractionForm({
+        interactionDate: new Date().toISOString().split('T')[0],
+        interactionTime: '',
+        remarks: '',
+        outcome: '',
+        nextFollowupDate: '',
+      });
+      fetchLeadDetail(false);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save interaction log.');
+    } finally {
+      setSavingInteraction(false);
+    }
+  };
+
+  const handleDeleteInteractionLog = async (logId) => {
+    if (!window.confirm('Delete this interaction log entry?')) return;
+    try {
+      await axios.delete(`/api/v1/interactionLogs/interaction-logs/${logId}`);
+      toast.success('Interaction log deleted.');
+      fetchLeadDetail(false);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete interaction log.');
     }
   };
 
   if (loading) {
+
+
     return (
       <div className="flex items-center justify-center py-24">
         <div className="spinner"></div>
@@ -1212,11 +1269,180 @@ export const LeadDetailPage = () => {
             )}
           </div>
 
+          {/* Interaction History Log */}
+          <div className="glass-panel p-6 bg-white border border-[--border] shadow-sm space-y-4">
+            <h3 className="text-xs font-bold text-[--text-primary] uppercase tracking-wider border-b border-[--border] pb-2 flex items-center gap-2">
+              <MessageSquare size={14} className="text-amber-500" />
+              Interaction History
+              {interactionCount > 0 && (
+                <span className="ml-auto bg-amber-100 text-amber-700 text-[9px] font-black px-1.5 py-0.5 rounded-full">
+                  {interactionCount} logged
+                </span>
+              )}
+            </h3>
+
+            {/* Interaction log entries */}
+            <div className="space-y-3">
+              {interactionLogs.length === 0 ? (
+                <div className="text-center py-4 text-[--text-muted] text-xs italic">
+                  No interactions logged yet.
+                </div>
+              ) : (
+                interactionLogs.map(log => {
+                  const logDate = log.interaction_date
+                    ? new Date(log.interaction_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : '-';
+                  const loggedBy = log.recorded_by_name || log.recorded_by_raw_name || 'Unknown';
+                  const canDelete = isAdmin || (user?.sub === log.recorded_by);
+                  const OUTCOME_COLORS = {
+                    'Interested':          'bg-emerald-100 text-emerald-700',
+                    'Not Reachable':       'bg-slate-100 text-slate-600',
+                    'Callback Requested':  'bg-blue-100 text-blue-700',
+                    'Not Interested':      'bg-red-100 text-red-600',
+                    'Converted':           'bg-purple-100 text-purple-700',
+                  };
+                  const outcomeClass = log.outcome ? (OUTCOME_COLORS[log.outcome] || 'bg-stone-100 text-stone-600') : null;
+                  return (
+                    <div key={log.id} className="border border-[--border] rounded-lg p-2.5 bg-stone-50/60 text-[11px] space-y-1 group relative">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-[--text-primary]">{logDate}</span>
+                        {log.outcome && (
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${outcomeClass}`}>
+                            {log.outcome}
+                          </span>
+                        )}
+                        {canDelete && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteInteractionLog(log.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 ml-auto"
+                            title="Delete this entry"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        )}
+                      </div>
+                      {log.interaction_time && (
+                        <div className="text-[--text-muted]">
+                          <Clock size={9} className="inline mr-1" />
+                          {log.interaction_time}
+                        </div>
+                      )}
+                      {log.remarks && (
+                        <p className="text-[--text-secondary] leading-relaxed">{log.remarks}</p>
+                      )}
+                      {log.next_followup_date && (
+                        <div className="text-blue-600 font-medium">
+                          Next: {new Date(log.next_followup_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </div>
+                      )}
+                      <div className="text-[9px] text-[--text-muted] mt-1">
+                        Logged by <span className="font-semibold">{loggedBy}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Log Interaction button / form */}
+            {!showAddInteraction ? (
+              <button
+                type="button"
+                onClick={() => setShowAddInteraction(true)}
+                className="w-full py-2 bg-white border border-amber-200 hover:border-amber-400 text-amber-600 font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                <PlusCircle size={13} />
+                <span>Log Interaction</span>
+              </button>
+            ) : (
+              <form onSubmit={handleCreateInteractionLog} className="bg-amber-50/60 border border-amber-200 rounded-xl p-3.5 space-y-3">
+                <span className="text-[10px] font-black uppercase text-amber-600 tracking-wider block">Log New Interaction</span>
+
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-[--text-secondary]">Date <span className="text-red-500">*</span></label>
+                    <input
+                      type="date"
+                      required
+                      value={interactionForm.interactionDate}
+                      onChange={e => setInteractionForm(f => ({ ...f, interactionDate: e.target.value }))}
+                      className="bg-white border rounded p-1 text-[11px]"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-[--text-secondary]">Time (optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 10:00 AM"
+                      value={interactionForm.interactionTime}
+                      onChange={e => setInteractionForm(f => ({ ...f, interactionTime: e.target.value }))}
+                      className="bg-white border rounded p-1 text-[11px]"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 text-[11px]">
+                  <label className="font-bold text-[--text-secondary]">Outcome</label>
+                  <select
+                    value={interactionForm.outcome}
+                    onChange={e => setInteractionForm(f => ({ ...f, outcome: e.target.value }))}
+                    className="bg-white border rounded p-1 text-[11px]"
+                  >
+                    <option value="">-- No outcome --</option>
+                    {['Interested', 'Not Reachable', 'Callback Requested', 'Not Interested', 'Converted'].map(o => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1 text-[11px]">
+                  <label className="font-bold text-[--text-secondary]">Remarks</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Notes from this interaction..."
+                    value={interactionForm.remarks}
+                    onChange={e => setInteractionForm(f => ({ ...f, remarks: e.target.value }))}
+                    className="bg-white border rounded p-1 text-[11px] resize-none"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1 text-[11px]">
+                  <label className="font-bold text-[--text-secondary]">Next Follow-up Date</label>
+                  <input
+                    type="date"
+                    value={interactionForm.nextFollowupDate}
+                    onChange={e => setInteractionForm(f => ({ ...f, nextFollowupDate: e.target.value }))}
+                    className="bg-white border rounded p-1 text-[11px]"
+                  />
+                </div>
+
+                <div className="flex gap-1.5 justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setShowAddInteraction(false); }}
+                    className="px-2.5 py-1 border text-[10px] font-bold rounded hover:bg-stone-50 bg-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingInteraction}
+                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-[10px] rounded transition-all"
+                  >
+                    {savingInteraction ? 'Saving...' : 'Log It'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+
           {/* Lead creation and info metrics metadata */}
           <div className="glass-panel p-6 bg-white border border-[--border] shadow-sm space-y-4">
             <h3 className="text-xs font-bold text-[--text-primary] uppercase tracking-wider border-b border-[--border] pb-2 flex items-center gap-2">
               <Calendar size={16} className="text-[--accent]" /> Metadata History
             </h3>
+
             
             <div className="space-y-2.5 text-xs text-[--text-secondary] font-mono">
               <div className="flex justify-between">
@@ -1225,7 +1451,7 @@ export const LeadDetailPage = () => {
               </div>
               <div className="flex justify-between">
                 <span>Created By:</span>
-                <span className="text-[--text-primary]">{lead.uploadedBy?.name || 'Bulk upload seeder'}</span>
+                <span className="text-[--text-primary]">{lead.uploadedBy?.name || '—'}</span>
               </div>
               <div className="flex justify-between">
                 <span>Upload Source:</span>

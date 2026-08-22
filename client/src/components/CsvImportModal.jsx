@@ -61,11 +61,14 @@ export default function CsvImportModal({
   const [uploadResult, setUploadResult] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  // Track whether onImportComplete was already called (prevents double-fire from Done button)
+  const importCompletedRef = React.useRef(false);
 
   useEffect(() => {
     if (open) {
       setSubVerticalId(defaultSubVerticalId || '');
       setCurrentLeadType(leadType || leadTypeOptions?.[0]?.value || 'CALL');
+      importCompletedRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -133,6 +136,7 @@ export default function CsvImportModal({
   };
 
   const handleClose = () => {
+    importCompletedRef.current = false;
     setSelectedFile(null);
     setAssignTarget('');
     setUploadStatus('idle');
@@ -178,14 +182,27 @@ export default function CsvImportModal({
             clearInterval(intervalId);
             setUploadProgress(100);
             setUploadStatus('done');
+            const resultErrors = log.errors || [];
             setUploadResult({
               batchId: log.id,
               successCount: log.success_count || 0,
               failedCount: log.failed_count || 0,
               duplicateCount: log.duplicate_count || 0,
-              errors: log.errors || [],
+              errors: resultErrors,
             });
-            toast.success('Import completed.');
+            // Show the appropriate toast based on what actually happened
+            const hasStructureError = resultErrors.some(e => e.code === 'FILE_STRUCTURE_ERROR');
+            const successCount = log.success_count || 0;
+            if (hasStructureError) {
+              toast.error('Import failed: wrong file format. Please download the correct template and re-upload.');
+            } else if (successCount === 0 && (log.failed_count || 0) > 0) {
+              toast.error('Import completed with errors — no records were imported.');
+            } else if (successCount === 0 && (log.duplicate_count || 0) > 0) {
+              toast('All rows were duplicates — no new records added.', { icon: '⚠️' });
+            } else {
+              toast.success(`Import completed — ${successCount} record${successCount !== 1 ? 's' : ''} imported.`);
+            }
+            importCompletedRef.current = true;
             onImportComplete?.();
           } else if (log.status === 'failed') {
             clearInterval(intervalId);
@@ -572,7 +589,14 @@ export default function CsvImportModal({
 
             <div className="flex justify-end pt-2">
               <button
-                onClick={handleClose}
+                onClick={() => {
+                  // If onImportComplete wasn't called yet (e.g. user hit Done on a failed
+                  // upload), still trigger a refresh so the table isn't stale.
+                  if (!importCompletedRef.current) {
+                    onImportComplete?.();
+                  }
+                  handleClose();
+                }}
                 className="px-6 py-2 bg-[--accent] text-white font-bold rounded-lg text-sm hover:bg-[--accent-hover] shadow-sm"
               >
                 Done

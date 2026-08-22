@@ -24,6 +24,56 @@ import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ── Idempotent schema bootstrap ──────────────────────────────────────────────
+let deliveryDataSchemaReady = false;
+async function ensureDeliveryDataSchema() {
+    if (deliveryDataSchemaReady) return;
+    try {
+        await query(`
+            CREATE TABLE IF NOT EXISTS delivery_data (
+                id UUID PRIMARY KEY,
+                vertical_id UUID NOT NULL REFERENCES verticals(id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS assigned_user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS date DATE;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS business_type VARCHAR(255);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS business_name VARCHAR(255);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS contact_person VARCHAR(255);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS alternate_number VARCHAR(50);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS city VARCHAR(255);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS area VARCHAR(255);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS address TEXT;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS call_status VARCHAR(100);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS customer_response TEXT;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS follow_up_required VARCHAR(50);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS follow_up_date DATE;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS follow_up_time VARCHAR(100);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS next_action VARCHAR(255);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS remarks TEXT;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS converted VARCHAR(50);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS appointment_date DATE;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS appointment_timings VARCHAR(100);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS delivery_date DATE;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS delivery_time VARCHAR(100);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS linked_raw_data_id UUID;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'single_add';
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS csv_batch_id UUID;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id) ON DELETE SET NULL;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS employee_name_raw VARCHAR(255);
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+            ALTER TABLE delivery_data ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+            CREATE INDEX IF NOT EXISTS idx_delivery_data_vertical ON delivery_data(vertical_id);
+            CREATE INDEX IF NOT EXISTS idx_delivery_data_phone ON delivery_data(vertical_id, phone_number);
+        `);
+        deliveryDataSchemaReady = true;
+    } catch (err) {
+        console.error('⚠️ ensureDeliveryDataSchema error:', err.message);
+    }
+}
+
 // ── CSV formula-injection guard (H5) ────────────────────────────────────────
 // Prefix any value whose first character Excel/Sheets treats as a formula
 // trigger (=, +, -, @, tab, CR) with a literal single-quote BEFORE the
@@ -43,6 +93,7 @@ const sanitizeCsvValue = (val) => {
 export const getDeliveryData = async (req, res) => {
     const { verticalId, page = 1, limit = 25, sortBy, sortDir } = req.query;
     try {
+        await ensureDeliveryDataSchema();
         if (!verticalId || !isValidUUID(verticalId)) {
             return res.status(200).json({ success: true, data: [], meta: { total: 0, totalPages: 0 } });
         }
@@ -116,8 +167,8 @@ const DELIVERY_DATA_EXPORT_MAPPERS = {
     callStatus:         r => r.call_status          || '',
     customerResponse:   r => r.customer_response    || '',
     followUpRequired:   r => r.follow_up_required   || '',
-    followUpDate:       r => r.appointment_date_str || '',
-    followUpTime:       r => r.appointment_timings  || '',
+    followUpDate:       r => r.follow_up_date_str    || '',
+    followUpTime:       r => r.follow_up_time        || r.appointment_timings || '',
     nextAction:         r => r.next_action          || '',
     remarks:            r => r.remarks              || '',
     converted:          r => r.converted            || '',
@@ -147,7 +198,7 @@ export const exportDeliveryDataCsv = async (req, res) => {
         const rowsRes = await query(`
             SELECT d.*, u.name AS assignee_name,
                 to_char(d.date, 'YYYY-MM-DD') AS date_str,
-                to_char(d.appointment_date, 'YYYY-MM-DD') AS appointment_date_str,
+                to_char(COALESCE(d.follow_up_date, d.appointment_date), 'YYYY-MM-DD') AS follow_up_date_str,
                 to_char(d.delivery_date, 'YYYY-MM-DD') AS delivery_date_str
             FROM delivery_data d
             LEFT JOIN users u ON u.id = d.assigned_user_id
@@ -199,13 +250,22 @@ export const createDeliveryData = async (req, res) => {
             employeeName: req.body.employeeName,
             businessType: req.body.businessType,
             businessName: req.body.businessName,
+            contactPerson: req.body.contactPerson,
+            phoneNumber: req.body.phoneNumber,
+            alternateNumber: req.body.alternateNumber,
             area: req.body.area,
             city: req.body.city,
-            phoneNumber: req.body.phoneNumber,
             address: req.body.address,
+            callStatus: req.body.callStatus,
+            customerResponse: req.body.customerResponse,
+            followUpRequired: req.body.followUpRequired,
+            followUpDate: req.body.followUpDate,
+            followUpTime: req.body.followUpTime,
+            nextAction: req.body.nextAction,
+            remarks: req.body.remarks,
+            converted: req.body.converted,
             appointmentDate: req.body.appointmentDate,
             appointmentTimings: req.body.appointmentTimings,
-            remarks: req.body.remarks,
             deliveryDate: req.body.deliveryDate,
             deliveryTime: req.body.deliveryTime,
         };
@@ -229,18 +289,33 @@ export const createDeliveryData = async (req, res) => {
         const insertRes = await query(`
             INSERT INTO delivery_data (
                 id, vertical_id, assigned_user_id, date, business_type, business_name,
-                area, city, phone_number, address, appointment_date, appointment_timings,
-                remarks, delivery_date, delivery_time, linked_raw_data_id, source, created_by, employee_name_raw
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'single_add',$17,$18)
+                contact_person, phone_number, alternate_number,
+                area, city, address,
+                call_status, customer_response, follow_up_required,
+                follow_up_date, follow_up_time, next_action, remarks, converted,
+                appointment_date, appointment_timings,
+                delivery_date, delivery_time,
+                linked_raw_data_id, source, created_by, employee_name_raw
+            ) VALUES (
+                $1,$2,$3,$4,$5,$6,
+                $7,$8,$9,
+                $10,$11,$12,
+                $13,$14,$15,
+                $16,$17,$18,$19,$20,
+                $21,$22,
+                $23,$24,
+                $25,'single_add',$26,$27
+            )
             RETURNING *
         `, [
             id, verticalId, assignedUserId,
-            // See rawData.js's createRawData for why this uses the shared
-            // flexible parser instead of handing the raw string to Postgres.
             parseFlexibleDate(row.date), row.businessType || null, row.businessName || null,
-            row.area || null, row.city || null, phone, row.address || null,
+            row.contactPerson || null, phone, row.alternateNumber || null,
+            row.area || null, row.city || null, row.address || null,
+            row.callStatus || null, row.customerResponse || null, row.followUpRequired || null,
+            parseFlexibleDate(row.followUpDate), row.followUpTime || null, row.nextAction || null, row.remarks || null, row.converted || null,
             parseFlexibleDate(row.appointmentDate), row.appointmentTimings || null,
-            row.remarks || null, parseFlexibleDate(row.deliveryDate), row.deliveryTime || null,
+            parseFlexibleDate(row.deliveryDate), row.deliveryTime || null,
             linkResult.linkedRawDataId, req.user.sub, employeeNameRaw || null,
         ]);
 

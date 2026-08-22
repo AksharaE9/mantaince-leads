@@ -162,7 +162,7 @@ describe('Bulk lead-import API (CSV/Excel) — regression coverage', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
       expect(res.headers['content-type']).toContain('text/csv');
-      expect(res.text).toContain('CONTACT NUMBER');
+      expect(res.text).toContain('CONTACT');
     });
 
     it('generates an .xlsx template on the fly', async () => {

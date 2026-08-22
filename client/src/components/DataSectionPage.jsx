@@ -514,7 +514,7 @@ export default function DataSectionPage({ config }) {
       {ModalComponent && (
         <ModalComponent
           open={modalOpen}
-          onClose={() => setModalOpen(false)}
+          onClose={() => { setModalOpen(false); fetchRecords(); }}
           vertical={activeVertical}
           subVerticals={subVerticals}
           defaultSubVerticalId={subVerticalId}

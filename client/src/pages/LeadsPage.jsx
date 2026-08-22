@@ -43,20 +43,22 @@ const BASE_DYNAMIC_FIELDS = [
   { key: 'businessType', label: 'Business Type', type: 'text', defaultValue: '' },
   { key: 'area', label: 'Area', type: 'text', defaultValue: '' },
   { key: 'city', label: 'City', type: 'text', defaultValue: '' },
-  { key: 'pointOfContactName', label: 'Point of Contact Name', type: 'text', defaultValue: '' },
-  { key: 'pointOfContactNumber', label: 'Point of Contact Number', type: 'text', defaultValue: '' },
-  { key: 'deliveredLocation', label: 'Link Address', type: 'text', defaultValue: '' },
+  { key: 'deliveredLocation', label: 'Map Location Link / Address', type: 'text', defaultValue: '' },
+  { key: 'requirement', label: 'Requirement', type: 'text', defaultValue: '' },
   { key: 'remarks', label: 'Remarks', type: 'text', defaultValue: '' },
-  { key: 'recordings', label: 'Recordings', type: 'text', defaultValue: '' },
-  { key: 'appointmentType', label: 'Appointment type (yes or no)', type: 'select', defaultValue: '' },
-  { key: 'appointmentDate', label: 'Appointment date', type: 'date', defaultValue: '' },
-  { key: 'appointmentTime', label: 'Appointment time', type: 'text', defaultValue: '' },
-  { key: 'requirement', label: 'Requirement order if any', type: 'text', defaultValue: '' },
-  { key: 'notes', label: 'Notes to the cos if any', type: 'text', defaultValue: '' },
+  { key: 'followUpRequired', label: 'Follow Up Require (Yes/No)', type: 'select', defaultValue: '', options: ['Yes', 'No'] },
+  { key: 'followUpDate', label: 'Follow Up Date', type: 'date', defaultValue: '' },
+  { key: 'followUpRemarks', label: 'Follow Up Remarks', type: 'text', defaultValue: '' },
 ];
 
 const BASE_DYNAMIC_FIELD_KEYS = new Set([
   ...BASE_DYNAMIC_FIELDS.map((field) => field.key),
+  'pointOfContactName',
+  'pointOfContactNumber',
+  'appointmentType',
+  'appointmentDate',
+  'appointmentTime',
+  'notes',
   'point_of_contact',
   'point_of_contact_name',
   'point_of_contact_number',
@@ -184,6 +186,9 @@ export const LeadsPage = () => {
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  // Interaction log counts per lead — loaded in a single batch query after
+  // the lead list renders. Stored as { [leadId]: count }.
+  const [interactionCounts, setInteractionCounts] = useState({});
   const [configs, setConfigs] = useState([]);
   const [subVerticals, setSubVerticals] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -357,6 +362,17 @@ export const LeadsPage = () => {
     fetchLeads();
     setRowSelection({});
   }, [fetchLeads, leadsRefreshTrigger]);
+
+  // Batch-fetch interaction log counts for the current page of leads.
+  // One POST with all lead IDs — not per-row — so the table list query is
+  // never touched and cursor/covering-index performance is preserved.
+  useEffect(() => {
+    if (!leads.length) { setInteractionCounts({}); return; }
+    const ids = leads.map(l => l._id || l.id).filter(Boolean);
+    axios.post('/api/v1/interactionLogs/leads/batch-counts', { leadIds: ids })
+      .then(res => setInteractionCounts(res.data.data || {}))
+      .catch(() => {}); // non-critical; badge just stays hidden on error
+  }, [leads]);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -796,6 +812,26 @@ export const LeadsPage = () => {
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'requirement')),
       },
       {
+        id: 'remarks',
+        header: 'REMARKS',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'remarks')),
+      },
+      {
+        id: 'followUpRequired',
+        header: 'FOLLOW UP REQUIRE (YES/NO)',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'followUpRequired')),
+      },
+      {
+        id: 'followUpDate',
+        header: 'FOLLOW UP DATE',
+        cell: ({ row }) => formatDynamicValue('date', getLeadData(row.original, 'followUpDate')),
+      },
+      {
+        id: 'followUpRemarks',
+        header: 'FOLLOW UP REMARKS',
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'followUpRemarks')),
+      },
+      {
         accessorKey: 'status',
         header: 'Status',
         cell: ({ row }) => (
@@ -806,6 +842,19 @@ export const LeadsPage = () => {
             onStatusUpdated={() => fetchLeads()}
           />
         ),
+      },
+      {
+        id: 'interactions',
+        header: 'Logged',
+        cell: ({ row }) => {
+          const count = interactionCounts[row.original._id || row.original.id] || 0;
+          if (!count) return <span className="text-[--text-muted] text-xs">–</span>;
+          return (
+            <span className="inline-flex items-center gap-0.5 bg-amber-100 text-amber-700 text-[9px] font-black px-1.5 py-0.5 rounded-full whitespace-nowrap">
+              📝 {count}
+            </span>
+          );
+        },
       },
       {
         id: 'actions',
@@ -858,7 +907,8 @@ export const LeadsPage = () => {
       ...customColumns,
       ...fixedColumns.slice(fixedColumns.length - 2),
     ];
-  }, [columnVisibility, customConfigs, navigate]);
+  }, [columnVisibility, customConfigs, navigate, interactionCounts]);
+
 
   const table = useReactTable({
     data: leads,
@@ -1005,6 +1055,29 @@ export const LeadsPage = () => {
         }}
       />
 
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+        {/* Search */}
+        <div className="relative flex-1 max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+          <input
+            type="text"
+            placeholder="Search leads by name, phone, business..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg pl-9 pr-4 py-2 text-xs font-semibold focus:outline-none focus:border-[--accent]"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              onClick={() => { setSearchInput(''); updateQueryParam('q', ''); }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-[--text-primary] text-xs font-bold bg-transparent border-0 outline-none"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
       {csvBatchId && (
         <div className="flex items-center justify-between p-3 bg-[--accent-light] border border-[--accent-border] rounded-lg text-sm text-[--accent] mb-4">
           <div className="flex items-center gap-2">
@@ -1023,17 +1096,14 @@ export const LeadsPage = () => {
 
       {showFilters && (
         <div className="glass-panel p-4 bg-white border border-[--border]">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            <FilterInput label="Search Leads">
-              <div className="relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[--text-muted]" />
-                <input
-                  value={searchInput}
-                  onChange={(event) => setSearchInput(event.target.value)}
-                  className="w-full pl-10"
-                  placeholder="Search by name or number"
-                />
-              </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <FilterInput label="Sub-Vertical (Sector)">
+              <select value={subVerticalFilter} onChange={(event) => updateQueryParam('subVerticalId', event.target.value)} className="w-full">
+                <option value="">All sub-verticals</option>
+                {subVerticals.map((sub) => (
+                  <option key={sub._id} value={sub._id}>{sub.name}</option>
+                ))}
+              </select>
             </FilterInput>
 
             <FilterInput label="Lead Status">
@@ -1044,7 +1114,6 @@ export const LeadsPage = () => {
                 ))}
               </select>
             </FilterInput>
-
 
             <FilterInput label="Lead Type">
               <select value={leadTypeFilter} onChange={(event) => updateQueryParam('leadType', event.target.value)} className="w-full">
@@ -1071,6 +1140,19 @@ export const LeadsPage = () => {
                 className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-1.5 focus:outline-none focus:border-[--accent] text-xs"
               />
             </FilterInput>
+
+            <div className="flex flex-col gap-1.5 justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchParams({ verticalId: activeVertical._id });
+                  setSearchInput('');
+                }}
+                className="w-full py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs rounded-lg transition-all border border-stone-200"
+              >
+                Reset All Filters
+              </button>
+            </div>
           </div>
         </div>
       )}

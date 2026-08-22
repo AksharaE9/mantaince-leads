@@ -5,6 +5,7 @@ import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { parseUploadBuffer } from '../services/spreadsheetParser.js';
 import { ErrorCodes } from '../utils/operationError.js';
 import { logger } from '../lib/logger.js';
+import { hasFollowupData, extractFollowupFields, INTERACTION_OUTCOMES } from '../services/interactionLogImportSchema.js';
 
 // ── Batch sizing ───────────────────────────────────────────────────────────────
 // 1000 rows per INSERT: matches bulkInsert.js CHUNK_SIZE, halves round-trips vs. 500.
@@ -193,11 +194,17 @@ function validateCsvFileHeaders(rawRows, leadType) {
         'business/person/shop/company name', 'name', 'business name',
         'contact number', 'contact', 'phone', 'mobile', 'mobile number', 'phone number',
         'point of contact', 'pointofcontact', 'area', 'city',
-        'link address', 'delivered location', 'address',
+        'link address', 'delivered location', 'address', 'map location link/address', 'map location link / address',
         'remarks', 'recordings',
         'appointment type (yes or no)', 'appointment type', 'appointment date', 'appointment time',
         'requirement order if any', 'requirement',
         'notes to the cos if any', 'notes',
+        'follow up require (yes/no)', 'follow-up require (yes/no)', 'follow-up required',
+        'follow up date', 'follow-up date', 'follow-up dates',
+        'follow up remarks', 'follow-up remarks',
+        // Interaction log columns (appended by getLeadImportSchema)
+        'follow-up date', 'follow-up time', 'follow-up remarks', 'follow-up outcome', 'next follow-up date',
+        'followup date', 'followup time', 'followup remarks', 'followup outcome', 'next followup date',
     ]);
     const KNOWN_HEADERS_POSITIVE = new Set([
         'date', 'employee name', 'business type',
@@ -205,8 +212,13 @@ function validateCsvFileHeaders(rawRows, leadType) {
         'area', 'city', 'contact number', 'contact', 'phone', 'mobile', 'mobile number', 'phone number',
         'point of contact', 'pointofcontact', 'remarks', 'recordings',
         'follow-up required', 'follow-ups', 'follow-up dates', 'follow-up remarks',
-        'requirement if any', 'requirement',
-        'a notes to the cos team only', 'notes',
+        'follow up require (yes/no)', 'follow-up require (yes/no)', 'follow up date', 'follow-up date', 'follow up remarks', 'follow-up remarks',
+        'requirement if any', 'requirement', 'requirement order if any',
+        'a notes to the cos team only', 'notes', 'notes to the cos if any',
+        'link address', 'delivered location', 'address', 'map location link/address', 'map location link / address',
+        // Interaction log columns (appended by getLeadImportSchema)
+        'follow-up date', 'follow-up time', 'follow-up remarks', 'follow-up outcome', 'next follow-up date',
+        'followup date', 'followup time', 'followup remarks', 'followup outcome', 'next followup date',
     ]);
     const knownSet = leadType === 'POSITIVE' ? KNOWN_HEADERS_POSITIVE : KNOWN_HEADERS_CALL;
     const extraColumns = originalHeaders.filter((h, i) => !knownSet.has(normalizedHeaders[i]));
@@ -234,13 +246,9 @@ const processCsvJob = async (job) => {
     let successCount = 0;
     let duplicateCount = 0;
     const errors = [];
-    // Phone-number-only-mandatory policy (see CLAUDE.md / rawDataImportSchema.js):
-    // a missing Business/Person/Shop/Company Name used to be a hard reject here.
-    // It's now a non-blocking warning — the row still inserts with an empty
-    // business_name — matching Raw Data/Delivery Data's policy. Only a
-    // missing/invalid phone number blocks a row now.
     const warnings = [];
     const validLeads = [];
+    const pendingFollowups = [];
 
     // ── 2. Mark job as in-progress ────────────────────────────────────────────
     await query(
@@ -386,7 +394,38 @@ const processCsvJob = async (job) => {
                 warnings.push({ row: rowNum, field: 'name', reason: 'Business / Person / Shop / Company name is blank — accepted, left blank' });
             }
 
+            // ── Follow-up-aware duplicate detection ──────────────────────────
+            // A CSV row with the same phone AS AN EXISTING lead in the DB, AND
+            // with at least one follow-up field filled, is treated as an
+            // interaction-log append — NOT a duplicate. The lead row is skipped;
+            // only a new lead_interaction_logs entry is queued.
+            //
+            // A same-phone row WITHOUT follow-up data is still a genuine
+            // duplicate and takes the existing error path unchanged.
+            const rowHasFollowup = hasFollowupData(row);
+
             if (phoneSet.has(rawPhone)) {
+                if (rowHasFollowup) {
+                    // Follow-up append path: queue an interaction log entry.
+                    // leadId will be resolved by a batch DB lookup after inserts.
+                    const fup = extractFollowupFields(row);
+                    if (fup) {
+                        pendingFollowups.push({
+                            phone: rawPhone,
+                            leadId: null, // resolved post-insert
+                            section: leadType === 'POSITIVE' ? 'positives' : 'cos',
+                            ...fup,
+                            csvRowNum: rowNum,
+                        });
+                        rowOutcomes.push({ row: rowNum, status: 'followup_appended', reason: `Interaction log entry queued for phone ${rawPhone}` });
+                    } else {
+                        // hasFollowupData true but extractFollowupFields returned null — shouldn't happen but guard
+                        rowOutcomes.push({ row: rowNum, status: 'skipped', reason: `Skipped (same phone, no follow-up data after extraction)` });
+                    }
+                    continue;
+                }
+
+                // Genuine duplicate (same phone, no follow-up data)
                 duplicateCount++;
                 // Name the specific existing record when it's a genuine DB
                 // duplicate (conflictLabelByPhone); a within-CSV duplicate
@@ -408,41 +447,19 @@ const processCsvJob = async (job) => {
 
             // ── Build data payload ────────────────────────────────────────────
             const dataMap = {};
-            const isPositiveLead = leadType === 'POSITIVE';
+            dataMap['date']              = row['date'] || '';
+            dataMap['employeeName']      = defaultAssigneeName || row['employee name'] || '';
+            dataMap['businessType']      = row['business type'] || '';
+            dataMap['businessName']      = rawBusiness;
+            dataMap['area']              = row['area'] || '';
+            dataMap['city']              = row['city'] || '';
+            dataMap['deliveredLocation'] = row['map location link/address'] || row['map location link / address'] || row['link address'] || row['delivered location'] || row['address'] || '';
+            dataMap['requirement']       = row['requirement'] || row['requirement if any'] || row['requirement order if any'] || '';
+            dataMap['remarks']           = row['remarks'] || '';
+            dataMap['followUpRequired']  = row['follow up require (yes/no)'] || row['follow-up require (yes/no)'] || row['follow-up required'] || row['appointment type (yes or no)'] || row['appointment type'] || '';
+            dataMap['followUpDate']      = row['follow up date'] || row['follow-up date'] || row['follow-up dates'] || row['appointment date'] || '';
+            dataMap['followUpRemarks']   = row['follow up remarks'] || row['follow-up remarks'] || row['notes to the cos if any'] || row['a notes to the cos team only'] || row['notes'] || '';
 
-            if (isPositiveLead) {
-                dataMap['date']              = row['date'] || '';
-                dataMap['employeeName']      = defaultAssigneeName || row['employee name'] || '';
-                dataMap['businessType']      = row['business type'] || '';
-                dataMap['businessName']      = rawBusiness;
-                dataMap['area']              = row['area'] || '';
-                dataMap['city']              = row['city'] || '';
-                dataMap['pointOfContact']    = row['point of contact'] || row['pointofcontact'] || '';
-                dataMap['remarks']           = row['remarks'] || '';
-                dataMap['recordings']        = row['recordings'] || '';
-                dataMap['followUpRequired']  = row['follow-up required'] || '';
-                dataMap['followUps']         = row['follow-ups'] || '';
-                dataMap['followUpDates']     = row['follow-up dates'] || '';
-                dataMap['followUpRemarks']   = row['follow-up remarks'] || '';
-                dataMap['requirement']       = row['requirement if any'] || row['requirement'] || '';
-                dataMap['notes']             = row['a notes to the cos team only'] || row['notes'] || '';
-            } else {
-                dataMap['date']              = row['date'] || '';
-                dataMap['employeeName']      = defaultAssigneeName || row['employee name'] || '';
-                dataMap['businessType']      = row['business type'] || '';
-                dataMap['businessName']      = rawBusiness;
-                dataMap['area']              = row['area'] || '';
-                dataMap['city']              = row['city'] || '';
-                dataMap['pointOfContact']    = row['point of contact'] || row['pointofcontact'] || '';
-                dataMap['deliveredLocation'] = row['link address'] || row['delivered location'] || row['address'] || '';
-                dataMap['remarks']           = row['remarks'] || '';
-                dataMap['recordings']        = row['recordings'] || '';
-                dataMap['appointmentType']   = row['appointment type (yes or no)'] || row['appointment type'] || '';
-                dataMap['appointmentDate']   = row['appointment date'] || '';
-                dataMap['appointmentTime']   = row['appointment time'] || '';
-                dataMap['requirement']       = row['requirement order if any'] || row['requirement'] || '';
-                dataMap['notes']             = row['notes to the cos if any'] || row['notes'] || '';
-            }
 
             // ── Map custom field configs from CSV headers ─────────────────────
             for (const cfg of configs) {
@@ -478,6 +495,20 @@ const processCsvJob = async (job) => {
                 csvRowNum:    rowNum,
                 originalRow:  rawRow,
             });
+            const newLead = validLeads[validLeads.length - 1];
+            // ── If this new lead row also carries follow-up data, queue it ────
+            if (rowHasFollowup) {
+                const fup = extractFollowupFields(row);
+                if (fup) {
+                    pendingFollowups.push({
+                        phone: rawPhone,
+                        leadId: newLead.id, // already known — this is a new lead
+                        section: leadType === 'POSITIVE' ? 'positives' : 'cos',
+                        ...fup,
+                        csvRowNum: rowNum,
+                    });
+                }
+            }
         }
 
         // ── 8. Bulk INSERT in BATCH_SIZE chunks ───────────────────────────────
@@ -530,12 +561,99 @@ const processCsvJob = async (job) => {
             await emitProgress(batchId, uploadedBy, verticalId, 'processing', totalRows, successCount, errors, duplicateCount);
         }
 
+        // ── 8.5. Insert pending interaction logs (follow-up appended rows) ──────
+        // Runs AFTER lead INSERTs so the FK (lead_id) always references an
+        // already-committed row. pendingFollowups entries whose leadId is null
+        // are from same-phone follow-up rows pointing to pre-existing DB leads;
+        // those need a batch phone→id lookup now.
+        if (pendingFollowups.length > 0) {
+            // Resolve null leadIds (pre-existing leads) via a single batch query
+            const unresolvedPhones = [...new Set(
+                pendingFollowups.filter(f => !f.leadId).map(f => f.phone)
+            )];
+            const phoneToLeadId = new Map();
+            if (unresolvedPhones.length > 0) {
+                const existingRes = await query(`
+                    SELECT id, phone FROM cost_conversions
+                    WHERE vertical_id = $1 AND sub_vertical_id = $2 AND lead_type = $3
+                      AND phone = ANY($4) AND is_deleted = false
+                `, [verticalId, subVerticalId, leadType, unresolvedPhones]);
+                for (const row of existingRes.rows) {
+                    phoneToLeadId.set(row.phone, row.id);
+                }
+            }
+
+            const VALID_OUTCOMES_SET = new Set(['Interested', 'Not Reachable', 'Callback Requested', 'Not Interested', 'Converted']);
+
+            const logValues = [];
+            const logParams = [];
+            let lp = 1;
+            for (const fup of pendingFollowups) {
+                const resolvedLeadId = fup.leadId || phoneToLeadId.get(fup.phone);
+                if (!resolvedLeadId) {
+                    // Phone disappeared between dedup scan and now — very rare;
+                    // treat as a non-blocking warning, never block the whole job.
+                    errors.push({
+                        row: fup.csvRowNum,
+                        code: 'INTERACTION_LOG_ORPHAN',
+                        reason: `Could not resolve lead for phone ${fup.phone} — interaction log entry skipped`,
+                        warning: true,
+                    });
+                    continue;
+                }
+                // Parse and validate interactionDate — skip if unparseable
+                const dateVal = fup.interactionDate ? fup.interactionDate.toString().trim() : '';
+                if (!dateVal) continue; // no date, can't insert (NOT NULL)
+
+                const outcomeVal = fup.outcome && VALID_OUTCOMES_SET.has(fup.outcome) ? fup.outcome : null;
+
+                logValues.push(`($${lp++}, $${lp++}, $${lp++}, $${lp++}, $${lp++}, $${lp++}, $${lp++}, $${lp++}, $${lp++}, 'bulk_upload')`);
+                logParams.push(
+                    crypto.randomUUID(),  // id
+                    resolvedLeadId,        // lead_id
+                    fup.section,           // section
+                    dateVal,               // interaction_date
+                    fup.interactionTime || null,   // interaction_time
+                    fup.remarks || null,            // remarks
+                    outcomeVal,                     // outcome
+                    fup.nextFollowupDate || null,   // next_followup_date
+                    batchId,                        // csv_batch_id
+                );
+            }
+
+            if (logValues.length > 0) {
+                try {
+                    await query(`
+                        INSERT INTO lead_interaction_logs
+                            (id, lead_id, section, interaction_date, interaction_time,
+                             remarks, outcome, next_followup_date, csv_batch_id, source)
+                        VALUES ${logValues.join(', ')}
+                    `, logParams);
+                    console.log(`[CSV Processor] Inserted ${logValues.length} interaction log entries for batch ${batchId}`);
+                } catch (logErr) {
+                    // Non-blocking — interaction log insert failures should not fail
+                    // the whole upload (leads already committed above).
+                    console.error('[CSV Processor] Interaction log bulk insert failed (non-fatal):', logErr.message);
+                    errors.push({
+                        row: 0,
+                        code: 'INTERACTION_LOG_INSERT_FAILED',
+                        reason: `Some follow-up log entries could not be saved: ${logErr.message}`,
+                        warning: true,
+                    });
+                }
+            }
+        }
+
+
         const outcomeSuccess = rowOutcomes.filter(o => o.status === 'success').length;
         const outcomeDuplicate = rowOutcomes.filter(o => o.status === 'duplicate').length;
         const outcomeFailed = rowOutcomes.filter(o => o.status === 'failed').length;
-        const outcomeTotal = outcomeSuccess + outcomeDuplicate + outcomeFailed;
+        const outcomeFollowupAppended = rowOutcomes.filter(o => o.status === 'followup_appended').length;
+        const outcomeSkipped = rowOutcomes.filter(o => o.status === 'skipped').length;
+        // followup_appended and skipped are now legitimate non-error outcomes
+        const outcomeTotal = outcomeSuccess + outcomeDuplicate + outcomeFailed + outcomeFollowupAppended + outcomeSkipped;
 
-        console.log(`[CSV Processor] Batch final report: total=${totalRows}, outcomes=${outcomeTotal} (success=${outcomeSuccess}, duplicates=${outcomeDuplicate}, failed=${outcomeFailed})`);
+        console.log(`[CSV Processor] Batch final report: total=${totalRows}, outcomes=${outcomeTotal} (success=${outcomeSuccess}, duplicates=${outcomeDuplicate}, failed=${outcomeFailed}, followup_appended=${outcomeFollowupAppended}, skipped=${outcomeSkipped})`);
         if (outcomeTotal !== totalRows) {
             console.error(`[CSV Processor] MISMATCH warning: totalRows (${totalRows}) !== outcomeTotal (${outcomeTotal})`);
         }

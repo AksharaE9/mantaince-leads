@@ -45,19 +45,26 @@ const BASE_DYNAMIC_FIELDS = [
   { key: 'businessType', label: 'Business Type', type: 'text', defaultValue: '' },
   { key: 'area', label: 'Area', type: 'text', defaultValue: '' },
   { key: 'city', label: 'City', type: 'text', defaultValue: '' },
-  { key: 'pointOfContact', label: 'Point of Contact', type: 'text', defaultValue: '' },
+  { key: 'deliveredLocation', label: 'Map Location Link / Address', type: 'text', defaultValue: '' },
+  { key: 'requirement', label: 'Requirement', type: 'text', defaultValue: '' },
   { key: 'remarks', label: 'Remarks', type: 'text', defaultValue: '' },
-  { key: 'recordings', label: 'Recordings', type: 'text', defaultValue: '' },
-  { key: 'followUpRequired', label: 'Follow-up required', type: 'text', defaultValue: '' },
-  { key: 'followUps', label: 'Follow-ups', type: 'text', defaultValue: '' },
-  { key: 'followUpDates', label: 'Follow-up dates', type: 'text', defaultValue: '' },
-  { key: 'followUpRemarks', label: 'Follow-up remarks', type: 'text', defaultValue: '' },
-  { key: 'requirement', label: 'Requirement if any', type: 'text', defaultValue: '' },
-  { key: 'notes', label: 'A notes to the cos team only', type: 'text', defaultValue: '' },
+  { key: 'followUpRequired', label: 'Follow Up Require (Yes/No)', type: 'select', defaultValue: '', options: ['Yes', 'No'] },
+  { key: 'followUpDate', label: 'Follow Up Date', type: 'date', defaultValue: '' },
+  { key: 'followUpRemarks', label: 'Follow Up Remarks', type: 'text', defaultValue: '' },
 ];
 
 const BASE_DYNAMIC_FIELD_KEYS = new Set([
   ...BASE_DYNAMIC_FIELDS.map((field) => field.key),
+  'pointOfContact',
+  'pointOfContactName',
+  'pointOfContactNumber',
+  'appointmentType',
+  'appointmentDate',
+  'appointmentTime',
+  'notes',
+  'recordings',
+  'followUps',
+  'followUpDates',
   'point_of_contact',
   'point_of_contact_name',
   'point_of_contact_number',
@@ -182,6 +189,7 @@ export const FollowUpsPositivesPage = () => {
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [interactionCounts, setInteractionCounts] = useState({});
   const [configs, setConfigs] = useState([]);
   const [subVerticals, setSubVerticals] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -388,6 +396,14 @@ export const FollowUpsPositivesPage = () => {
     fetchTodayCount();
     setRowSelection({});
   }, [fetchLeads, fetchTodayCount, leadsRefreshTrigger]);
+
+  useEffect(() => {
+    if (!leads.length) { setInteractionCounts({}); return; }
+    const ids = leads.map(l => l._id || l.id).filter(Boolean);
+    axios.post('/api/v1/interactionLogs/leads/batch-counts', { leadIds: ids })
+      .then(res => setInteractionCounts(res.data.data || {}))
+      .catch(() => {});
+  }, [leads]);
 
   useEffect(() => {
     if (showCalendar) {
@@ -864,9 +880,9 @@ export const FollowUpsPositivesPage = () => {
         cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'remarks')),
       },
       {
-        id: 'requireFollowUp',
+        id: 'followUpRequired',
         header: 'FOLLOW UP REQUIRE (YES/NO)',
-        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'requireFollowUp')),
+        cell: ({ row }) => formatDynamicValue('text', getLeadData(row.original, 'followUpRequired')),
       },
       {
         id: 'followUpDate',
@@ -889,6 +905,19 @@ export const FollowUpsPositivesPage = () => {
             onStatusUpdated={() => fetchLeads()}
           />
         ),
+      },
+      {
+        id: 'interactions',
+        header: 'Logged',
+        cell: ({ row }) => {
+          const count = interactionCounts[row.original._id || row.original.id] || 0;
+          if (!count) return <span className="text-[--text-muted] text-xs">–</span>;
+          return (
+            <span className="inline-flex items-center gap-0.5 bg-amber-100 text-amber-700 text-[9px] font-black px-1.5 py-0.5 rounded-full whitespace-nowrap">
+              📝 {count}
+            </span>
+          );
+        },
       },
       {
         id: 'actions',
@@ -941,7 +970,7 @@ export const FollowUpsPositivesPage = () => {
       ...customColumns,
       ...fixedColumns.slice(fixedColumns.length - 2),
     ];
-  }, [columnVisibility, customConfigs, navigate, isAdmin]);
+  }, [columnVisibility, customConfigs, navigate, isAdmin, interactionCounts]);
 
   const table = useReactTable({
     data: leads,

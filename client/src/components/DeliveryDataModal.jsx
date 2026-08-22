@@ -15,9 +15,11 @@ const DELIVERY_DATA_ENDPOINTS = {
 };
 
 const emptyForm = {
-  date: '', employeeName: '', businessType: '', businessName: '', area: '', city: '',
-  phoneNumber: '', address: '', appointmentDate: '', appointmentTimings: '', remarks: '',
-  deliveryDate: '', deliveryTime: '',
+  date: '', employeeName: '', businessType: '', businessName: '', contactPerson: '',
+  phoneNumber: '', alternateNumber: '', city: '', area: '', address: '',
+  callStatus: '', customerResponse: '', followUpRequired: '', followUpDate: '',
+  followUpTime: '', nextAction: '', remarks: '', converted: '',
+  appointmentDate: '', appointmentTimings: '', deliveryDate: '', deliveryTime: '',
 };
 
 const FormField = ({ label, required, children }) => (
@@ -114,7 +116,7 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">
-      <div className="glass-panel w-full max-w-2xl p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div className="glass-panel w-full max-w-3xl p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-[--border] pb-3">
           <h3 className="text-lg font-bold text-[--text-primary] flex items-center gap-2">
             <Truck className="text-[--accent]" size={20} />
@@ -170,23 +172,64 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
             <FormField label="Business Name">
               <input type="text" placeholder="-" className="w-full" value={form.businessName} onChange={set('businessName')} />
             </FormField>
-            <FormField label="Area">
-              <input type="text" placeholder="-" className="w-full" value={form.area} onChange={set('area')} />
+            <FormField label="Contact Person">
+              <input type="text" placeholder="-" className="w-full" value={form.contactPerson} onChange={set('contactPerson')} />
+            </FormField>
+            <FormField label="Mobile Number" required>
+              <input type="text" required className="w-full" value={form.phoneNumber} onChange={set('phoneNumber')} />
+            </FormField>
+            <FormField label="Alternate Number">
+              <input type="text" placeholder="-" className="w-full" value={form.alternateNumber} onChange={set('alternateNumber')} />
             </FormField>
             <FormField label="City">
               <input type="text" placeholder="-" className="w-full" value={form.city} onChange={set('city')} />
             </FormField>
-            <FormField label="Phone Number" required>
-              <input type="text" required className="w-full" value={form.phoneNumber} onChange={set('phoneNumber')} />
+            <FormField label="Area">
+              <input type="text" placeholder="-" className="w-full" value={form.area} onChange={set('area')} />
             </FormField>
-            <FormField label="Address">
+            <FormField label="Address / Map Location">
               <input type="text" placeholder="-" className="w-full" value={form.address} onChange={set('address')} />
+            </FormField>
+            <FormField label="Call Status">
+              <select className="w-full" value={form.callStatus} onChange={set('callStatus')}>
+                <option value="">-- Select --</option>
+                <option value="Connected">Connected</option>
+                <option value="Busy">Busy</option>
+                <option value="Not Reachable">Not Reachable</option>
+                <option value="Switched Off">Switched Off</option>
+                <option value="Callback Requested">Callback Requested</option>
+                <option value="Wrong Number">Wrong Number</option>
+                <option value="Disconnected">Disconnected</option>
+              </select>
+            </FormField>
+            <FormField label="Follow-up Required">
+              <select className="w-full" value={form.followUpRequired} onChange={set('followUpRequired')}>
+                <option value="">-- Select --</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </FormField>
+            <FormField label="Follow-up Date">
+              <input type="date" className="w-full" value={form.followUpDate} onChange={set('followUpDate')} />
+            </FormField>
+            <FormField label="Follow-up Time">
+              <input type="text" placeholder="e.g. 10:00 AM - 11:00 AM" className="w-full" value={form.followUpTime} onChange={set('followUpTime')} />
             </FormField>
             <FormField label="Appointment Date">
               <input type="date" className="w-full" value={form.appointmentDate} onChange={set('appointmentDate')} />
             </FormField>
             <FormField label="Appointment Timings">
               <input type="text" placeholder="e.g. 10:00 AM - 11:00 AM" className="w-full" value={form.appointmentTimings} onChange={set('appointmentTimings')} />
+            </FormField>
+            <FormField label="Next Action">
+              <input type="text" placeholder="-" className="w-full" value={form.nextAction} onChange={set('nextAction')} />
+            </FormField>
+            <FormField label="Converted (Y/N)">
+              <select className="w-full" value={form.converted} onChange={set('converted')}>
+                <option value="">-- Select --</option>
+                <option value="Y">Y</option>
+                <option value="N">N</option>
+              </select>
             </FormField>
             <FormField label="Delivery Date">
               <input type="date" className="w-full" value={form.deliveryDate} onChange={set('deliveryDate')} />
@@ -195,6 +238,9 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
               <input type="text" placeholder="e.g. 2:00 PM - 3:00 PM" className="w-full" value={form.deliveryTime} onChange={set('deliveryTime')} />
             </FormField>
           </div>
+          <FormField label="Customer Response">
+            <textarea className="w-full" rows={2} value={form.customerResponse} onChange={set('customerResponse')} />
+          </FormField>
           <FormField label="Remarks">
             <textarea className="w-full" rows={3} maxLength={500} value={form.remarks} onChange={set('remarks')} />
           </FormField>

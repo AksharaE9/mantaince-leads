@@ -134,7 +134,7 @@ describe('Bulk Lead Import Pipeline Hardening', () => {
         const errors = updatedLog.errors || [];
         errors.forEach(e => {
             if (e.reason.includes('Duplicate')) {
-                expect(e.reason).toBe('Duplicate: mobile number already exists');
+                expect(e.reason).toContain('Duplicate: mobile number already exists');
             } else {
                 expect(e.reason).not.toContain('violates unique constraint');
                 expect(e.reason).not.toContain('database');

@@ -113,7 +113,7 @@ describe('getLeadImportSchema', () => {
   it('drops custom fields whose header collides with a base header', async () => {
     vi.mocked(query).mockResolvedValue({
       rows: [
-        { field_key: 'dup', csv_header: 'CONTACT NUMBER', label: 'Dup Phone', field_type: 'text', options: [], is_required: false, is_csv_mapped: true, display_order: 1 },
+        { field_key: 'dup', csv_header: 'CONTACT', label: 'Dup Phone', field_type: 'text', options: [], is_required: false, is_csv_mapped: true, display_order: 1 },
       ],
     });
 
