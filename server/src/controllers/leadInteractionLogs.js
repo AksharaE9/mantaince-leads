@@ -366,23 +366,27 @@ export const exportInteractionLogsCsv = async (req, res) => {
                 l.recorded_by_raw_name,
                 l.source,
                 l.created_at,
+                l.section,
                 COALESCE(u.name, l.recorded_by_raw_name, '-') AS recorded_by_display,
-                c.business_name AS lead_business_name,
-                c.name AS lead_name,
-                c.phone AS lead_phone,
-                c.lead_type,
-                sv.name AS sub_vertical_name
+                COALESCE(c.business_name, r.business_name, d.business_name, '-') AS lead_business_name,
+                COALESCE(c.name, r.lead_name, d.contact_person, '-') AS lead_name,
+                COALESCE(c.phone, r.phone_number, d.phone_number, '-') AS lead_phone,
+                COALESCE(c.lead_type, 'RAW', 'DELIVERY') AS lead_type,
+                COALESCE(sv_c.name, sv_r.name, '-') AS sub_vertical_name
             FROM lead_interaction_logs l
-            JOIN cost_conversions c ON l.lead_id = c.id AND c.is_deleted = false
+            LEFT JOIN cost_conversions c ON l.lead_id = c.id AND l.section IN ('cos', 'positives') AND c.is_deleted = false
+            LEFT JOIN raw_data r ON l.lead_id = r.id AND l.section = 'raw_data' AND r.is_deleted = false
+            LEFT JOIN delivery_data d ON l.lead_id = d.id AND l.section = 'delivery_data' AND d.is_deleted = false
             LEFT JOIN users u ON l.recorded_by = u.id
-            LEFT JOIN sub_verticals sv ON c.sub_vertical_id = sv.id
-            WHERE c.vertical_id = $1
+            LEFT JOIN sub_verticals sv_c ON c.sub_vertical_id = sv_c.id
+            LEFT JOIN sub_verticals sv_r ON r.sub_vertical_id = sv_r.id
+            WHERE COALESCE(c.vertical_id, r.vertical_id, d.vertical_id) = $1
         `;
         const params = [verticalId];
         let pIdx = 2;
 
         if (subVerticalId && isValidUUID(subVerticalId)) {
-            sql += ` AND c.sub_vertical_id = $${pIdx++}`;
+            sql += ` AND COALESCE(c.sub_vertical_id, r.sub_vertical_id) = $${pIdx++}`;
             params.push(subVerticalId);
         }
         if (section) {
@@ -402,7 +406,7 @@ export const exportInteractionLogsCsv = async (req, res) => {
             params.push(dateTo);
         }
         if (leadType) {
-            sql += ` AND c.lead_type = $${pIdx++}`;
+            sql += ` AND COALESCE(c.lead_type, 'RAW') = $${pIdx++}`;
             params.push(leadType);
         }
 
