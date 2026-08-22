@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Filter, Download, Upload, Plus, ChevronLeft, ChevronRight, ChevronDown,
-  FileSpreadsheet, AlertTriangle, Layers,
+  FileSpreadsheet, AlertTriangle, Layers, MessageSquare, Calendar, Clock, Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import axios from '../api/axios.js';
@@ -40,6 +40,7 @@ export default function DataSectionPage({ config }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState('single');
   const [searchInput, setSearchInput] = useState('');
+  const [interactionCounts, setInteractionCounts] = useState({});
 
   const page = parseInt(searchParams.get('page') || '1', 10);
   const limit = parseInt(searchParams.get('limit') || '15', 10);
@@ -132,6 +133,18 @@ export default function DataSectionPage({ config }) {
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
 
   useEffect(() => { if (leadsRefreshTrigger > 0) fetchRecords(); }, [leadsRefreshTrigger]);
+
+  const refreshCounts = useCallback(() => {
+    if (!records.length) { setInteractionCounts({}); return; }
+    const ids = records.map(r => r.id || r._id).filter(Boolean);
+    axios.post('/api/v1/interactionLogs/leads/batch-counts', { leadIds: ids })
+      .then(res => setInteractionCounts(res.data.data || {}))
+      .catch(() => {});
+  }, [records]);
+
+  useEffect(() => {
+    refreshCounts();
+  }, [records, refreshCounts]);
 
   useEffect(() => {
     const t = setTimeout(() => { if (searchInput !== search) updateQueryParam('q', searchInput); }, 400);
@@ -459,11 +472,16 @@ export default function DataSectionPage({ config }) {
                   return (
                     <React.Fragment key={rowId}>
                       <tr className="border-b border-[--border] hover:bg-stone-50/60">
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 flex items-center gap-1.5 min-w-[70px]">
                           {detailFields.length > 0 && (
                             <button type="button" onClick={() => setExpandedRowId(expanded ? null : rowId)} className="text-[--text-muted] hover:text-[--text-primary]">
                               <ChevronRight size={14} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
                             </button>
+                          )}
+                          {interactionCounts[rowId] > 0 && (
+                            <span className="inline-flex items-center gap-0.5 bg-amber-100 text-amber-700 text-[9px] font-black px-1.5 py-0.5 rounded-full whitespace-nowrap" title={`${interactionCounts[rowId]} Logged Interactions`}>
+                              📝 {interactionCounts[rowId]}
+                            </span>
                           )}
                         </td>
                         {columns.map((col) => (
@@ -474,14 +492,18 @@ export default function DataSectionPage({ config }) {
                       </tr>
                       {expanded && (
                         <tr className="bg-stone-50/50 border-b border-[--border]">
-                          <td colSpan={columns.length + 1} className="px-8 py-4">
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 text-xs">
-                              {detailFields.map((f) => (
-                                <div key={f.key}>
-                                  <span className="block font-black uppercase text-[9px] text-[--text-secondary]">{f.label}</span>
-                                  <span className="text-[--text-primary] font-medium">{f.render ? f.render(row) : (row[f.key] || '-')}</span>
-                                </div>
-                              ))}
+                          <td colSpan={columns.length + 1} className="px-8 py-5">
+                            <div className="space-y-5">
+                              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 text-xs">
+                                {detailFields.map((f) => (
+                                  <div key={f.key}>
+                                    <span className="block font-black uppercase text-[9px] text-[--text-secondary]">{f.label}</span>
+                                    <span className="text-[--text-primary] font-medium">{f.render ? f.render(row) : (row[f.key] || '-')}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="border-t border-[--border]" />
+                              <ExpandedRowInteractionHistory rowId={rowId} onMutated={refreshCounts} />
                             </div>
                           </td>
                         </tr>
@@ -522,6 +544,246 @@ export default function DataSectionPage({ config }) {
           initialMode={modalMode}
           onSaved={fetchRecords}
         />
+      )}
+    </div>
+  );
+}
+
+function ExpandedRowInteractionHistory({ rowId, onMutated }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+
+  // Form State
+  const [interactionDate, setInteractionDate] = useState('');
+  const [interactionTime, setInteractionTime] = useState('');
+  const [remarks, setRemarks] = useState('');
+  const [outcome, setOutcome] = useState('');
+  const [nextFollowupDate, setNextFollowupDate] = useState('');
+  const [recordedByName, setRecordedByName] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await axios.get(`/api/v1/interactionLogs/leads/${rowId}/interaction-logs`);
+      setLogs(res.data.data || []);
+    } catch (err) {
+      console.error('Failed to load interaction logs:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [rowId]);
+
+  useEffect(() => {
+    fetchLogs();
+  }, [fetchLogs]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!interactionDate) { toast.error('Follow-up Date is required'); return; }
+    setSaving(true);
+    try {
+      await axios.post(`/api/v1/interactionLogs/leads/${rowId}/interaction-logs`, {
+        interactionDate,
+        interactionTime,
+        remarks,
+        outcome: outcome || null,
+        nextFollowupDate: nextFollowupDate || null,
+        recordedByName
+      });
+      toast.success('Interaction logged successfully');
+      setShowForm(false);
+      // Reset form
+      setInteractionDate('');
+      setInteractionTime('');
+      setRemarks('');
+      setOutcome('');
+      setNextFollowupDate('');
+      setRecordedByName('');
+      fetchLogs();
+      onMutated?.();
+    } catch (err) {
+      console.error('Failed to save interaction:', err);
+      toast.error('Failed to log interaction');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (logId) => {
+    if (!window.confirm('Are you sure you want to delete this interaction log?')) return;
+    try {
+      await axios.delete(`/api/v1/interactionLogs/interaction-logs/${logId}`);
+      toast.success('Interaction log deleted');
+      fetchLogs();
+      onMutated?.();
+    } catch (err) {
+      console.error('Failed to delete interaction log:', err);
+      toast.error('Failed to delete interaction log');
+    }
+  };
+
+  const getOutcomeBadge = (ot) => {
+    if (!ot) return null;
+    const lower = ot.toLowerCase();
+    let badgeClass = 'bg-stone-100 text-stone-700 border-stone-200';
+    if (lower.includes('interested') || lower.includes('convert')) {
+      badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    } else if (lower.includes('callback') || lower.includes('requested')) {
+      badgeClass = 'bg-blue-50 text-blue-700 border-blue-200';
+    } else if (lower.includes('reachable') || lower.includes('busy')) {
+      badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
+    } else if (lower.includes('not interested')) {
+      badgeClass = 'bg-red-50 text-red-700 border-red-200';
+    }
+    return (
+      <span className={`inline-block px-1.5 py-0.5 text-[9px] font-black uppercase rounded-full border ${badgeClass}`}>
+        {ot}
+      </span>
+    );
+  };
+
+  return (
+    <div className="bg-stone-50 border border-stone-200 rounded-lg p-4 space-y-4 max-w-4xl text-xs">
+      <div className="flex items-center justify-between">
+        <h4 className="font-bold text-[10px] uppercase text-[--text-secondary] flex items-center gap-1.5">
+          <MessageSquare size={13} className="text-[--accent]" />
+          <span>Interaction History Log</span>
+        </h4>
+        <button
+          type="button"
+          onClick={() => setShowForm(!showForm)}
+          className="text-[10px] font-bold text-[--accent] hover:underline"
+        >
+          {showForm ? 'Cancel Add' : '+ Add Log'}
+        </button>
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleSubmit} className="bg-white border border-stone-200 rounded-lg p-3 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] font-black uppercase text-stone-500">Date *</span>
+              <input
+                type="date"
+                required
+                className="p-1 border rounded text-[11px] bg-white w-full"
+                value={interactionDate}
+                onChange={(e) => setInteractionDate(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] font-black uppercase text-stone-500">Time (Optional)</span>
+              <input
+                type="text"
+                placeholder="e.g. 10:30 AM"
+                className="p-1 border rounded text-[11px] bg-white w-full"
+                value={interactionTime}
+                onChange={(e) => setInteractionTime(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] font-black uppercase text-stone-500">Outcome (Optional)</span>
+              <select
+                className="p-1 border rounded text-[11px] bg-white w-full"
+                value={outcome}
+                onChange={(e) => setOutcome(e.target.value)}
+              >
+                <option value="">-- Choose Outcome --</option>
+                <option value="Interested">Interested</option>
+                <option value="Not Reachable">Not Reachable</option>
+                <option value="Callback Requested">Callback Requested</option>
+                <option value="Not Interested">Not Interested</option>
+                <option value="Converted">Converted</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] font-black uppercase text-stone-500">Next Follow-up Date</span>
+              <input
+                type="date"
+                className="p-1 border rounded text-[11px] bg-white w-full"
+                value={nextFollowupDate}
+                onChange={(e) => setNextFollowupDate(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] font-black uppercase text-stone-500">Recorded By (Optional Name)</span>
+              <input
+                type="text"
+                placeholder="e.g. Sneha"
+                className="p-1 border rounded text-[11px] bg-white w-full"
+                value={recordedByName}
+                onChange={(e) => setRecordedByName(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] font-black uppercase text-stone-500">Remarks / Call Notes</span>
+            <textarea
+              rows={2}
+              placeholder="Type detail notes here..."
+              className="p-1 border rounded text-[11px] bg-white w-full"
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+            />
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-3 py-1 bg-[--accent] hover:bg-[--accent-hover] text-white text-[10px] font-bold rounded"
+            >
+              {saving ? 'Saving...' : 'Save Log Entry'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {loading ? (
+        <div className="text-center py-2 text-stone-400">Loading history...</div>
+      ) : logs.length === 0 ? (
+        <div className="text-center py-3 text-stone-400 font-medium">No past interactions logged for this record.</div>
+      ) : (
+        <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
+          {logs.map((log) => (
+            <div key={log.id} className="bg-white border border-stone-200 rounded-lg p-2.5 flex items-start justify-between gap-3 shadow-xs">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-bold text-stone-800 flex items-center gap-1">
+                    <Calendar size={10} className="text-stone-400" />
+                    {log.interaction_date ? log.interaction_date.slice(0, 10).split('-').reverse().join('-') : '-'}
+                  </span>
+                  {log.interaction_time && (
+                    <span className="text-stone-500 font-mono flex items-center gap-0.5">
+                      <Clock size={10} className="text-stone-400" />
+                      {log.interaction_time}
+                    </span>
+                  )}
+                  {getOutcomeBadge(log.outcome)}
+                  {log.next_followup_date && (
+                    <span className="text-[9px] bg-stone-100 text-stone-600 border border-stone-200 rounded px-1.5 py-0.5">
+                      Next Fup: {log.next_followup_date.slice(0, 10).split('-').reverse().join('-')}
+                    </span>
+                  )}
+                </div>
+                {log.remarks && <p className="text-stone-700 leading-normal">{log.remarks}</p>}
+                <div className="text-[9px] text-stone-400 flex items-center gap-1.5">
+                  <span>Logged by: <strong className="text-stone-600">{log.recorded_by_name || log.recorded_by_raw_name || '—'}</strong></span>
+                  <span>•</span>
+                  <span>Source: <span className="font-mono">{log.source || '—'}</span></span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleDelete(log.id)}
+                className="text-stone-400 hover:text-red-500 p-1"
+                title="Delete Log"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

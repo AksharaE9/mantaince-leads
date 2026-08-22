@@ -40,18 +40,51 @@ function formatDateDMY(val) {
  * Returns null if the lead does not exist or is deleted.
  */
 async function resolveLeadScoping(leadId, user) {
-    const res = await query(
+    // 1. Try cost_conversions
+    let res = await query(
         `SELECT id, vertical_id, sub_vertical_id, lead_type, business_name, name, phone
          FROM cost_conversions WHERE id = $1 AND is_deleted = false`,
         [leadId]
     );
-    const lead = res.rows[0];
-    if (!lead) return null;
-    // Scoping: super_admin bypasses; others must have vertical access
-    if (user.role !== 'super_admin' && (!user.verticalAccess || !user.verticalAccess.includes(lead.vertical_id))) {
-        return { forbidden: true };
+    if (res.rows[0]) {
+        const lead = res.rows[0];
+        if (user.role !== 'super_admin' && (!user.verticalAccess || !user.verticalAccess.includes(lead.vertical_id))) {
+            return { forbidden: true };
+        }
+        return lead;
     }
-    return lead;
+
+    // 2. Try raw_data
+    res = await query(
+        `SELECT id, vertical_id, sub_vertical_id, business_name, lead_name as name, phone_number as phone
+         FROM raw_data WHERE id = $1 AND is_deleted = false`,
+        [leadId]
+    );
+    if (res.rows[0]) {
+        const lead = res.rows[0];
+        lead.lead_type = 'RAW';
+        if (user.role !== 'super_admin' && (!user.verticalAccess || !user.verticalAccess.includes(lead.vertical_id))) {
+            return { forbidden: true };
+        }
+        return lead;
+    }
+
+    // 3. Try delivery_data
+    res = await query(
+        `SELECT id, vertical_id, sub_vertical_id, business_name, contact_person as name, phone_number as phone
+         FROM delivery_data WHERE id = $1 AND is_deleted = false`,
+        [leadId]
+    );
+    if (res.rows[0]) {
+        const lead = res.rows[0];
+        lead.lead_type = 'DELIVERY';
+        if (user.role !== 'super_admin' && (!user.verticalAccess || !user.verticalAccess.includes(lead.vertical_id))) {
+            return { forbidden: true };
+        }
+        return lead;
+    }
+
+    return null;
 }
 
 /**
@@ -167,7 +200,14 @@ export const createInteractionLog = async (req, res) => {
         if (lead.forbidden) return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
 
         // Determine section from lead_type
-        const section = lead.lead_type === 'POSITIVE' ? 'positives' : 'cos';
+        let section = 'cos';
+        if (lead.lead_type === 'POSITIVE') {
+            section = 'positives';
+        } else if (lead.lead_type === 'RAW') {
+            section = 'raw_data';
+        } else if (lead.lead_type === 'DELIVERY') {
+            section = 'delivery_data';
+        }
 
         // Resolve recordedBy: use current user (always), preserve raw name if provided
         const recordedBy = req.user.sub;

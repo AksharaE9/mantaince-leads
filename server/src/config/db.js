@@ -777,7 +777,7 @@ const runMigrations = async () => {
         -- Data can be added later without a migration.
         CREATE TABLE IF NOT EXISTS lead_interaction_logs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            lead_id UUID NOT NULL REFERENCES cost_conversions(id) ON DELETE CASCADE,
+            lead_id UUID NOT NULL,
             section VARCHAR(30) NOT NULL DEFAULT 'cos',
             interaction_date DATE NOT NULL,
             interaction_time VARCHAR(50),
@@ -791,6 +791,7 @@ const runMigrations = async () => {
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE lead_interaction_logs DROP CONSTRAINT IF EXISTS lead_interaction_logs_lead_id_fkey;
         CREATE INDEX IF NOT EXISTS idx_lead_interaction_logs_lead_date ON lead_interaction_logs(lead_id, interaction_date DESC);
         CREATE INDEX IF NOT EXISTS idx_lead_interaction_logs_batch ON lead_interaction_logs(csv_batch_id);
         CREATE INDEX IF NOT EXISTS idx_lead_interaction_logs_date ON lead_interaction_logs(interaction_date);

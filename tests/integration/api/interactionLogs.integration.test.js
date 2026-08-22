@@ -153,8 +153,10 @@ describe('Interaction Logs & Bulk Follow-up imports', () => {
 
         let logRow = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
         const filePath = `./server/uploads/${logRow.file_name}`;
-        if (logRow.status === 'queued') {
-            await query("UPDATE csv_upload_logs SET status = 'processing' WHERE id = $1", [batchId]);
+        
+        // Attempt atomic update to lock the job (acquire lock)
+        const lockRes = await query("UPDATE csv_upload_logs SET status = 'processing' WHERE id = $1 AND status = 'queued'", [batchId]);
+        if (lockRes.rowCount === 1) {
             const buffer = fs.readFileSync(filePath);
             const mockJob = {
                 data: {
@@ -171,7 +173,7 @@ describe('Interaction Logs & Bulk Follow-up imports', () => {
             const { processCsvJob } = await import('../../../server/src/jobs/csvProcessor.js');
             await processCsvJob(mockJob);
         } else {
-            // Wait for background worker
+            // Background worker acquired the lock, wait for it to complete
             for (let k = 0; k < 30; k++) {
                 logRow = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
                 if (logRow.status === 'done' || logRow.status === 'failed') break;
@@ -222,8 +224,10 @@ describe('Interaction Logs & Bulk Follow-up imports', () => {
 
         let logRow = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
         const filePath = `./server/uploads/${logRow.file_name}`;
-        if (logRow.status === 'queued') {
-            await query("UPDATE csv_upload_logs SET status = 'processing' WHERE id = $1", [batchId]);
+        
+        // Attempt atomic update to lock the job (acquire lock)
+        const lockRes = await query("UPDATE csv_upload_logs SET status = 'processing' WHERE id = $1 AND status = 'queued'", [batchId]);
+        if (lockRes.rowCount === 1) {
             const buffer = fs.readFileSync(filePath);
             const mockJob = {
                 data: {
@@ -240,7 +244,7 @@ describe('Interaction Logs & Bulk Follow-up imports', () => {
             const { processInteractionLogJob } = await import('../../../server/src/jobs/interactionLogProcessor.js');
             await processInteractionLogJob(mockJob);
         } else {
-            // Wait for background worker
+            // Background worker acquired the lock, wait for it to complete
             for (let k = 0; k < 30; k++) {
                 logRow = (await query('SELECT * FROM csv_upload_logs WHERE id = $1', [batchId])).rows[0];
                 if (logRow.status === 'done' || logRow.status === 'failed') break;
