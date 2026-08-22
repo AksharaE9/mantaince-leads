@@ -5,36 +5,15 @@ import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 
 // ── 1. Search employees by sub-vertical ──
 export const getUsersBySubVertical = async (req, res) => {
-  const { subVerticalId } = req.params;
   try {
     const result = await query(`
       SELECT DISTINCT u.id, u.name, u.email, r.name as role
       FROM users u
       JOIN roles r ON u.role_id = r.id
       WHERE u.is_active = true
-        AND (
-          -- Users explicitly assigned to this sub-vertical
-          EXISTS (
-            SELECT 1 FROM user_assignments ua
-            WHERE ua.user_id = u.id
-              AND ua.sub_vertical_id = $1
-              AND ua.is_active = true
-          )
-          OR
-          -- Super admins always appear
-          r.name = 'super_admin'
-          OR
-          -- Vertical admins and standard agents who have access to the parent vertical
-          (
-            (r.name = 'vertical_admin' OR r.name = 'agent')
-            AND $1::uuid IN (
-              SELECT sv2.id FROM sub_verticals sv2
-              WHERE sv2.vertical_id = ANY(u.vertical_access)
-            )
-          )
-        )
+        AND u.is_approved = true
       ORDER BY u.name ASC
-    `, [subVerticalId]);
+    `);
 
     return res.status(200).json({ success: true, data: result.rows });
   } catch (error) {
