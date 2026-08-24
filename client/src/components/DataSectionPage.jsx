@@ -239,6 +239,7 @@ export default function DataSectionPage({ config }) {
 
   const selectVertical = (v) => {
     setActiveVertical(v);
+    setSearchInput('');
     navigate(`${location.pathname}?verticalId=${v._id}`);
   };
 
