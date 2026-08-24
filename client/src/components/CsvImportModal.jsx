@@ -61,6 +61,8 @@ export default function CsvImportModal({
   const [uploadResult, setUploadResult] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [sheetsList, setSheetsList] = useState([]);
+  const [selectedSheetIndices, setSelectedSheetIndices] = useState([0]);
   // Track whether onImportComplete was already called (prevents double-fire from Done button)
   const importCompletedRef = React.useRef(false);
 
@@ -77,6 +79,8 @@ export default function CsvImportModal({
   useEffect(() => {
     if (!selectedFile || !vertical?._id) {
       setFilePreview(null);
+      setSheetsList([]);
+      setSelectedSheetIndices([0]);
       return undefined;
     }
     let cancelled = false;
@@ -89,17 +93,60 @@ export default function CsvImportModal({
           selectedFile.arrayBuffer(),
         ]);
         const schema = schemaRes.data.data.fields;
-        const workbook = XLSX.read(buffer, { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        const normalizedRows = rawRows.map((r) => {
-          const obj = {};
-          Object.entries(r).forEach(([k, v]) => { obj[normalizeHeaderKey(k)] = v; });
-          return obj;
-        });
-        const result = validateParsedRowsAgainstSchema(normalizedRows, schema);
-        if (!cancelled) setFilePreview(result);
-      } catch {
+        const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+        
+        // ── Check sheets list ──
+        const isExcel = selectedFile.name.endsWith('.xlsx') || selectedFile.name.endsWith('.xls');
+        if (isExcel) {
+          const manifest = workbook.SheetNames.map((name, index) => {
+            const sheet = workbook.Sheets[name];
+            const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+            return { index, name, rowCount: rawRows.length };
+          });
+          if (!cancelled) {
+            setSheetsList((prev) => {
+              const prevNames = prev.map(p => p.name).join(',');
+              const newNames = manifest.map(m => m.name).join(',');
+              if (prevNames !== newNames) {
+                setSelectedSheetIndices([0]);
+                return manifest;
+              }
+              return prev;
+            });
+          }
+        } else {
+          if (!cancelled) {
+            setSheetsList([]);
+            setSelectedSheetIndices([0]);
+          }
+        }
+
+        const activeIndex = selectedSheetIndices[0] ?? 0;
+        const sheetName = workbook.SheetNames[activeIndex] || workbook.SheetNames[0];
+        if (sheetName) {
+          const sheet = workbook.Sheets[sheetName];
+          const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          
+          // Format Date objects to DD-MM-YYYY string for preview
+          const normalizedRows = rawRows.map((r) => {
+            const obj = {};
+            Object.entries(r).forEach(([k, v]) => {
+              let val = v;
+              if (v instanceof Date) {
+                const day = String(v.getDate()).padStart(2, '0');
+                const month = String(v.getMonth() + 1).padStart(2, '0');
+                const year = v.getFullYear();
+                val = `${day}-${month}-${year}`;
+              }
+              obj[normalizeHeaderKey(k)] = val;
+            });
+            return obj;
+          });
+          const result = validateParsedRowsAgainstSchema(normalizedRows, schema);
+          if (!cancelled) setFilePreview(result);
+        }
+      } catch (err) {
+        console.error('Preview error:', err);
         if (!cancelled) setFilePreview({ previewFailed: true });
       } finally {
         if (!cancelled) setPreviewLoading(false);
@@ -107,7 +154,7 @@ export default function CsvImportModal({
     })();
 
     return () => { cancelled = true; };
-  }, [selectedFile, currentLeadType, vertical?._id]);
+  }, [selectedFile, currentLeadType, vertical?._id, selectedSheetIndices]);
 
   if (!open) return null;
 
@@ -156,6 +203,10 @@ export default function CsvImportModal({
       toast.error('Please select a sub-vertical');
       return;
     }
+    if (sheetsList.length > 1 && selectedSheetIndices.length === 0) {
+      toast.error('Please select at least one sheet to import');
+      return;
+    }
 
     setUploadStatus('uploading');
     setUploadProgress(10);
@@ -166,6 +217,9 @@ export default function CsvImportModal({
     if (showSubVertical && subVerticalId) formData.append('subVerticalId', subVerticalId);
     formData.append('leadType', currentLeadType);
     if (showAssignOperator && assignTarget) formData.append('assignedTo', assignTarget);
+    if (sheetsList.length > 1) {
+      formData.append('sheetIndices', JSON.stringify(selectedSheetIndices));
+    }
 
     try {
       const res = await axios.post(ep.upload(), formData);
@@ -304,6 +358,52 @@ export default function CsvImportModal({
                 </div>
               )}
             </div>
+
+            {sheetsList.length > 1 && (
+              <div className="space-y-2 p-3 bg-stone-50 rounded-xl border border-[--border-strong] text-stone-700">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black uppercase text-[--text-secondary]">Select Sheets to Import</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedSheetIndices.length === sheetsList.length) {
+                        setSelectedSheetIndices([]);
+                      } else {
+                        setSelectedSheetIndices(sheetsList.map(s => s.index));
+                      }
+                    }}
+                    className="text-xs text-[--accent] font-bold hover:underline bg-transparent border-0 cursor-pointer"
+                  >
+                    {selectedSheetIndices.length === sheetsList.length ? 'Deselect All' : 'Select All'}
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-36 overflow-y-auto pt-0.5">
+                  {sheetsList.map((sheet) => {
+                    const isSelected = selectedSheetIndices.includes(sheet.index);
+                    return (
+                      <label key={sheet.index} className={`flex items-center gap-2.5 p-2 bg-white rounded-lg border cursor-pointer transition-all ${isSelected ? 'border-[--accent] bg-stone-50/20' : 'border-[--border] hover:border-stone-400'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {
+                            if (isSelected) {
+                              setSelectedSheetIndices(selectedSheetIndices.filter(idx => idx !== sheet.index));
+                            } else {
+                              setSelectedSheetIndices([...selectedSheetIndices, sheet.index]);
+                            }
+                          }}
+                          className="rounded text-[--accent] focus:ring-[--accent] h-4 w-4"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-[--text-primary] truncate">{sheet.name}</p>
+                          <p className="text-[10px] text-[--text-secondary]">{sheet.rowCount} rows</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {previewLoading && (
               <p className="text-xs text-[--text-secondary]">Checking file against import rules…</p>
@@ -485,39 +585,61 @@ export default function CsvImportModal({
               </div>
             </div>
 
-            {uploadResult.errors.length > 0 && (() => {
+             {uploadResult.errors.length > 0 && (() => {
               // Separate file-level notices (row=0) from row-level errors
               const fileLevelEntries = uploadResult.errors.filter(e => e.row === 0);
-              const structureErrors = fileLevelEntries.filter(e => e.code === 'FILE_STRUCTURE_ERROR');
+              const structureErrors = fileLevelEntries.filter(e => e.code === 'FILE_STRUCTURE_ERROR' || e.code === 'COLUMN_EMPTY_ERROR');
+              const sheetSummaries = fileLevelEntries.filter(e => e.code === 'SHEET_SUMMARY');
               const aliasMatches = fileLevelEntries.filter(e => e.code === 'ALIAS_MATCH');
-              const fileWarnings = fileLevelEntries.filter(e => e.code === 'FILE_WARNING' || (e.warning && e.row === 0));
+              const fileWarnings = fileLevelEntries.filter(e => (e.code === 'FILE_WARNING' || (e.warning && e.row === 0)) && e.code !== 'SHEET_SUMMARY' && e.code !== 'COLUMN_EMPTY_ERROR');
               const rowErrors = uploadResult.errors.filter(e => e.row !== 0 && !e.warning);
 
               return (
-                <div className="space-y-2">
-                  {/* FILE_STRUCTURE_ERROR — prominent amber banner with template download */}
+                <div className="space-y-2 text-stone-700">
+                  {/* SHEET_SUMMARY — breakdown of imports per sheet */}
+                  {sheetSummaries.length > 0 && (
+                    <div className="border border-stone-200 rounded-lg p-3 bg-stone-50 space-y-2">
+                      <p className="text-[10px] font-bold text-stone-700 uppercase tracking-wide">Sheet Breakdown</p>
+                      <div className="space-y-1">
+                        {sheetSummaries.map((ss, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-xs border-b border-stone-100 last:border-b-0 pb-1 last:pb-0">
+                            <span className="font-semibold text-stone-800">{ss.sheetName || `Sheet ${ss.row || idx + 1}`}</span>
+                            <span className="text-[11px] text-stone-600 font-mono">
+                              {ss.reason.includes(': ') ? ss.reason.split(': ').pop() : ss.reason}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* FILE_STRUCTURE_ERROR / COLUMN_EMPTY_ERROR — prominent amber banner with template download */}
                   {structureErrors.map((err, idx) => (
                     <div key={idx} className="border border-amber-300 rounded-lg p-3 bg-amber-50 space-y-2">
-                      <p className="text-[11px] font-bold text-amber-800 uppercase tracking-wide">⚠ Wrong Template Detected</p>
+                      <p className="text-[11px] font-bold text-amber-800 uppercase tracking-wide">
+                        {err.code === 'COLUMN_EMPTY_ERROR' ? '⚠️ Required Column Empty' : '⚠️ Wrong Template Detected'}
+                      </p>
                       <p className="text-xs text-amber-900 leading-relaxed">{err.reason}</p>
-                      <div className="flex gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadTemplate('xlsx')}
-                          className="text-[11px] font-bold text-amber-800 border border-amber-300 bg-amber-100 hover:bg-amber-200 rounded px-2 py-1 flex items-center gap-1"
-                        >
-                          <Download size={11} />
-                          Download Correct Template (.xlsx)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadTemplate('csv')}
-                          className="text-[11px] font-bold text-amber-800 border border-amber-300 bg-amber-100 hover:bg-amber-200 rounded px-2 py-1 flex items-center gap-1"
-                        >
-                          <Download size={11} />
-                          CSV Template
-                        </button>
-                      </div>
+                      {err.code !== 'COLUMN_EMPTY_ERROR' && (
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadTemplate('xlsx')}
+                            className="text-[11px] font-bold text-amber-800 border border-amber-300 bg-amber-100 hover:bg-amber-200 rounded px-2 py-1 flex items-center gap-1"
+                          >
+                            <Download size={11} />
+                            Download Correct Template (.xlsx)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadTemplate('csv')}
+                            className="text-[11px] font-bold text-amber-800 border border-amber-300 bg-amber-100 hover:bg-amber-200 rounded px-2 py-1 flex items-center gap-1"
+                          >
+                            <Download size={11} />
+                            CSV Template
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
 

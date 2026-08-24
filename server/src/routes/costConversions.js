@@ -18,6 +18,7 @@ import {
   downloadCsvTemplate,
   getImportSchema,
   uploadCsv,
+  inspectCsvSheets,
   getCsvLogs,
   getCsvLogById,
   streamFailedRows
@@ -79,6 +80,9 @@ router.use(attachRole);
 // CSV Upload specific routes
 router.get('/csv/template/:verticalId', checkPermission('csv:template'), downloadCsvTemplate);
 router.get('/csv/schema/:verticalId', checkPermission('csv:template'), getImportSchema);
+// Inspect-sheets: returns sheet manifest without importing — used by the
+// client-side sheet picker before the real upload is submitted.
+router.post('/csv/inspect-sheets', checkPermission('csv:upload'), rateLimiter('leads_csv_upload', 20, 3600), csvUpload.single('file'), inspectCsvSheets);
 // C5: rate-limit bulk uploads — each one now holds a Vercel instance open
 // via waitUntil, so unbounded uploads are also a cost-DoS vector, not just
 // an abuse vector. 20/hour per user (falls back to IP for unauthenticated

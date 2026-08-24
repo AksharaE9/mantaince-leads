@@ -20,6 +20,7 @@ import {
 } from '../services/deliveryDataImportSchema.js';
 import { parseFlexibleDate } from '../services/rawDataImportSchema.js';
 import { buildXlsxTemplate } from '../services/leadImportTemplate.js';
+import { inspectXlsxSheets } from '../services/spreadsheetParser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -389,6 +390,27 @@ export const getDeliveryDataSchema = async (req, res) => {
 };
 
 /**
+ * POST /delivery-data/inspect-sheets
+ *
+ * Returns the sheet manifest for an uploaded xlsx file without importing.
+ * Used by the client-side sheet picker. CSV files always yield one entry.
+ */
+export const inspectDeliveryDataSheets = async (req, res) => {
+    const file = req.file;
+    try {
+        if (!file) return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'A file is required', section: 'delivery_data', operation: 'inspect_sheets', field: 'file' });
+        const fileExt = path.extname(file.originalname).toLowerCase() || '.csv';
+        if (fileExt === '.xlsx' || fileExt === '.xls') {
+            const { sheets } = await inspectXlsxSheets(file.buffer);
+            return res.status(200).json({ success: true, data: { sheets } });
+        }
+        return res.status(200).json({ success: true, data: { sheets: [{ index: 0, name: 'Sheet 1', rowCount: null }] } });
+    } catch (error) {
+        return sendControllerError(res, error, 'inspectDeliveryDataSheets');
+    }
+};
+
+/**
  * POST /delivery-data/upload
  * Queues the file the same way uploadRawDataCsv does — same csv_upload_logs
  * table, discriminated by entity_type='delivery_data' so the shared worker
@@ -397,6 +419,20 @@ export const getDeliveryDataSchema = async (req, res) => {
 export const uploadDeliveryDataCsv = async (req, res) => {
     const { verticalId } = req.body;
     const file = req.file;
+    // sheetIndices: JSON array of 0-based sheet indices from the client-side
+    // sheet picker. Defaults to [0] for backward compatibility.
+    let sheetIndices = [0];
+    try {
+        if (req.body.sheetIndices) {
+            const parsed = typeof req.body.sheetIndices === 'string'
+                ? JSON.parse(req.body.sheetIndices)
+                : req.body.sheetIndices;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                sheetIndices = parsed.map(Number).filter(n => Number.isFinite(n) && n >= 0);
+            }
+        }
+    } catch { /* ignore malformed sheetIndices */ }
+
     try {
         if (!file) return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'A CSV or Excel file is required', section: 'delivery_data', operation: 'bulk_upload', field: 'file' });
         if (!verticalId || !isValidUUID(verticalId)) {
@@ -413,10 +449,10 @@ export const uploadDeliveryDataCsv = async (req, res) => {
         if (process.env.VERCEL) {
             // Vercel Serverless environment: bypass disk writes and run processing inline
             const logRes = await query(`
-                INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type)
-                VALUES ($1, $2, $3, $4, $5, 'processing', 'delivery_data')
+                INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type, sheet_indices)
+                VALUES ($1, $2, $3, $4, $5, 'processing', 'delivery_data', $6)
                 RETURNING *
-            `, [logId, req.user.sub, verticalId, fileName, file.originalname]);
+            `, [logId, req.user.sub, verticalId, fileName, file.originalname, JSON.stringify(sheetIndices)]);
 
             const uploadLog = logRes.rows[0];
 
@@ -435,7 +471,8 @@ export const uploadDeliveryDataCsv = async (req, res) => {
                     fileBufferBase64: file.buffer.toString('base64'),
                     verticalId,
                     uploadedBy: req.user.sub,
-                    fileExt
+                    fileExt,
+                    sheetIndices,
                 },
                 progress: async (value) => {
                     console.log(`[Vercel Inline Worker] Job ${uploadLog.id} progress: ${value}%`);
@@ -462,10 +499,10 @@ export const uploadDeliveryDataCsv = async (req, res) => {
         fs.writeFileSync(uploadPath, file.buffer);
 
         const logRes = await query(`
-            INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type)
-            VALUES ($1, $2, $3, $4, $5, 'queued', 'delivery_data')
+            INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type, sheet_indices)
+            VALUES ($1, $2, $3, $4, $5, 'queued', 'delivery_data', $6)
             RETURNING *
-        `, [logId, req.user.sub, verticalId, fileName, file.originalname]);
+        `, [logId, req.user.sub, verticalId, fileName, file.originalname, JSON.stringify(sheetIndices)]);
 
         const uploadLog = logRes.rows[0];
         await logAudit(req, {

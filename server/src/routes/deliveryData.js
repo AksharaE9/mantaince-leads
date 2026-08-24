@@ -6,6 +6,7 @@ import {
   downloadDeliveryDataTemplate,
   getDeliveryDataSchema,
   uploadDeliveryDataCsv,
+  inspectDeliveryDataSheets,
   exportDeliveryDataCsv,
   updateDeliveryData,
   deleteDeliveryData,
@@ -53,6 +54,7 @@ router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exp
 
 router.get('/import-template', checkPermission('csv:template'), downloadDeliveryDataTemplate);
 router.get('/schema', checkPermission('csv:template'), getDeliveryDataSchema);
+router.post('/inspect-sheets', checkPermission('csv:upload'), rateLimiter('delivery_data_csv_upload', 20, 3600), upload.single('file'), inspectDeliveryDataSheets);
 router.post('/upload', checkPermission('csv:upload'), rateLimiter('delivery_data_csv_upload', 20, 3600), upload.single('file'), uploadDeliveryDataCsv);
 
 // The csv_upload_logs status/log/error-report endpoints are entity-agnostic

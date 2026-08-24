@@ -98,19 +98,17 @@ function cellToString(cellValue) {
     return String(cellValue).trim();
 }
 
-async function parseXlsxBuffer(buffer) {
-    assertZipNotDecompressionBomb(buffer);
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
-
+/**
+ * Parse a single worksheet into an array of row objects, tagged with
+ * _sheetName so multi-sheet callers can distinguish which sheet each row
+ * came from for per-sheet result reporting.
+ *
+ * @param {ExcelJS.Worksheet} sheet
+ * @param {string} sheetName
+ * @returns {{ rows: object[], warnings: string[] }}
+ */
+function parseWorksheet(sheet, sheetName) {
     const warnings = [];
-    const sheet = workbook.worksheets[0];
-    if (!sheet) {
-        return { rows: [], warnings: ['The workbook has no sheets.'] };
-    }
-    if (workbook.worksheets.length > 1) {
-        warnings.push(`The file contains ${workbook.worksheets.length} sheets — only the first sheet ("${sheet.name}") was imported.`);
-    }
 
     let headers = [];
     const headerRow = sheet.getRow(1);
@@ -122,9 +120,9 @@ async function parseXlsxBuffer(buffer) {
     // Header detection: check if first row contains actual keywords or data
     const isHeaderRow = headers.some(h => {
         const hs = String(h).toLowerCase();
-        return hs.includes('date') || hs.includes('employee') || hs.includes('name') || 
-               hs.includes('business') || hs.includes('contact') || hs.includes('phone') || 
-               hs.includes('mobile') || hs.includes('area') || hs.includes('city') || 
+        return hs.includes('date') || hs.includes('employee') || hs.includes('name') ||
+               hs.includes('business') || hs.includes('contact') || hs.includes('phone') ||
+               hs.includes('mobile') || hs.includes('area') || hs.includes('city') ||
                hs.includes('address') || hs.includes('remarks') || hs.includes('requirement');
     });
 
@@ -138,13 +136,13 @@ async function parseXlsxBuffer(buffer) {
     if (!isHeaderRow && maxCol >= 6) {
         headers = standardHeaders;
         startRow = 1;
-        warnings.push('No header row detected in template — automatically mapped by column order.');
+        warnings.push(`Sheet "${sheetName}": No header row detected — automatically mapped by column order.`);
     }
 
     const rows = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
         if (rowNumber < startRow) return;
-        const obj = {};
+        const obj = { _sheetName: sheetName };
         let hasValue = false;
         headers.forEach((h, i) => {
             if (!h) return;
@@ -159,35 +157,107 @@ async function parseXlsxBuffer(buffer) {
 }
 
 /**
+ * Inspect an xlsx/xls buffer and return a manifest of all sheets with their
+ * names and approximate data row counts (excluding the header row).
+ * Never imports data — purely metadata for the sheet-selection UI.
+ *
+ * @param {Buffer} buffer
+ * @returns {Promise<{ sheets: Array<{ index: number, name: string, rowCount: number }> }>}
+ */
+export async function inspectXlsxSheets(buffer) {
+    assertZipNotDecompressionBomb(buffer);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+
+    const sheets = workbook.worksheets.map((sheet, index) => {
+        // Count non-empty data rows (row 2 onwards — row 1 is typically headers)
+        let rowCount = 0;
+        sheet.eachRow({ includeEmpty: false }, (_row, rowNumber) => {
+            if (rowNumber > 1) rowCount++;
+        });
+        return { index, name: sheet.name, rowCount };
+    });
+
+    return { sheets };
+}
+
+/**
+ * Parse one or more worksheets from an xlsx buffer, combining their rows.
+ * Each row object is tagged with _sheetName for per-sheet result reporting.
+ *
+ * @param {Buffer} buffer
+ * @param {number[]} sheetIndices - which sheets to parse (0-based). Defaults
+ *   to [0] for backward compatibility. Pass multiple indices to combine sheets.
+ * @returns {Promise<{ rows: object[], warnings: string[], sheetNames: string[] }>}
+ */
+async function parseXlsxBuffer(buffer, sheetIndices = [0]) {
+    assertZipNotDecompressionBomb(buffer);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+
+    const warnings = [];
+    const allSheets = workbook.worksheets;
+
+    if (allSheets.length === 0) {
+        return { rows: [], warnings: ['The workbook has no sheets.'], sheetNames: [] };
+    }
+
+    // Resolve which sheets to parse, clamping out-of-range indices
+    const validIndices = sheetIndices.filter(i => i >= 0 && i < allSheets.length);
+    if (validIndices.length === 0) {
+        return { rows: [], warnings: ['None of the requested sheet indices exist in this workbook.'], sheetNames: [] };
+    }
+
+    const combinedRows = [];
+    const parsedSheetNames = [];
+
+    for (const idx of validIndices) {
+        const sheet = allSheets[idx];
+        const { rows: sheetRows, warnings: sheetWarnings } = parseWorksheet(sheet, sheet.name);
+        combinedRows.push(...sheetRows);
+        parsedSheetNames.push(sheet.name);
+        warnings.push(...sheetWarnings);
+    }
+
+    return { rows: combinedRows, warnings, sheetNames: parsedSheetNames };
+}
+
+/**
  * Parses an uploaded lead-import file (CSV or Excel) into an array of
  * plain row objects keyed by original (as-typed) header text, plus any
  * non-fatal warnings (e.g. "only the first sheet was used"). Row objects
  * are shaped identically regardless of source format so the rest of the
  * import pipeline (normalizeRowKeys, validation, dedup, insert) doesn't
  * need to know or care which file type was uploaded.
+ *
+ * @param {Buffer} buffer
+ * @param {string} fileExt - e.g. '.xlsx', '.xls', '.csv'
+ * @param {number[]} [sheetIndices] - for xlsx only: which sheets to import.
+ *   Defaults to [0] (first sheet only). Pass multiple indices to combine sheets.
+ * @returns {Promise<{ rows: object[], warnings: string[], sheetNames: string[] }>}
  */
-export async function parseUploadBuffer(buffer, fileExt) {
+export async function parseUploadBuffer(buffer, fileExt, sheetIndices = [0]) {
     const ext = (fileExt || '.csv').toLowerCase();
 
     if (ext === '.xlsx' || ext === '.xls') {
-        const { rows, warnings } = await parseXlsxBuffer(buffer);
+        const { rows, warnings, sheetNames } = await parseXlsxBuffer(buffer, sheetIndices);
         if (rows.length > MAX_ROWS) {
             throw Object.assign(new Error(`File has ${rows.length} rows, which exceeds the ${MAX_ROWS.toLocaleString()} row limit. Please split it into smaller files.`), { status: 400 });
         }
-        return { rows, warnings };
+        return { rows, warnings, sheetNames: sheetNames || [] };
     }
 
     // Parse CSV with auto-headerless detection
     const records = parse(buffer, { columns: false, trim: true, skip_empty_lines: true, bom: true });
-    if (records.length === 0) return { rows: [], warnings: [] };
+    if (records.length === 0) return { rows: [], warnings: [], sheetNames: [] };
 
     let headers = records[0];
     const maxCol = headers.length;
     const isHeaderRow = headers.some(h => {
         const hs = String(h).toLowerCase();
-        return hs.includes('date') || hs.includes('employee') || hs.includes('name') || 
-               hs.includes('business') || hs.includes('contact') || hs.includes('phone') || 
-               hs.includes('mobile') || hs.includes('area') || hs.includes('city') || 
+        return hs.includes('date') || hs.includes('employee') || hs.includes('name') ||
+               hs.includes('business') || hs.includes('contact') || hs.includes('phone') ||
+               hs.includes('mobile') || hs.includes('area') || hs.includes('city') ||
                hs.includes('address') || hs.includes('remarks') || hs.includes('requirement');
     });
 
@@ -217,7 +287,7 @@ export async function parseUploadBuffer(buffer, fileExt) {
     if (rows.length > MAX_ROWS) {
         throw Object.assign(new Error(`File has ${rows.length} rows, which exceeds the ${MAX_ROWS.toLocaleString()} row limit. Please split it into smaller files.`), { status: 400 });
     }
-    return { rows, warnings };
+    return { rows, warnings, sheetNames: [] };
 }
 
 export default parseUploadBuffer;

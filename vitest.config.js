@@ -28,6 +28,7 @@ export default defineConfig({
       'react': path.resolve(__dirname, './node_modules/react'),
       'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
       'exifr': path.resolve(__dirname, './node_modules/exifr'),
+      'exceljs': path.resolve(__dirname, './server/node_modules/exceljs'),
     },
   },
 });

@@ -6,6 +6,7 @@ import {
   downloadRawDataTemplate,
   getRawDataSchema,
   uploadRawDataCsv,
+  inspectRawDataSheets,
   exportRawDataCsv,
   updateRawData,
   deleteRawData,
@@ -53,6 +54,7 @@ router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exp
 
 router.get('/import-template', checkPermission('csv:template'), downloadRawDataTemplate);
 router.get('/schema', checkPermission('csv:template'), getRawDataSchema);
+router.post('/inspect-sheets', checkPermission('csv:upload'), rateLimiter('raw_data_csv_upload', 20, 3600), upload.single('file'), inspectRawDataSheets);
 router.post('/upload', checkPermission('csv:upload'), rateLimiter('raw_data_csv_upload', 20, 3600), upload.single('file'), uploadRawDataCsv);
 
 // The csv_upload_logs status/log/error-report endpoints are entity-agnostic

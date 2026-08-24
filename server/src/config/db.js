@@ -568,6 +568,9 @@ const runMigrations = async () => {
         ALTER TABLE csv_upload_logs ADD COLUMN IF NOT EXISTS processing_finished_at TIMESTAMP;
         ALTER TABLE csv_upload_logs ALTER COLUMN file_name DROP NOT NULL;
         ALTER TABLE csv_upload_logs ADD COLUMN IF NOT EXISTS lead_type VARCHAR(50) NOT NULL DEFAULT 'CALL';
+        ALTER TABLE csv_upload_logs ADD COLUMN IF NOT EXISTS sheet_indices JSONB;
+
+
 
         -- FTS column (idempotent)
         ALTER TABLE cost_conversions ADD COLUMN IF NOT EXISTS search_vector TSVECTOR;

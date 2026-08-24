@@ -66,31 +66,50 @@ const HEADER_KEY_MAP = {
     'business type': 'businessType',
     'product/service': 'businessType',
     'product service': 'businessType',
+    product: 'businessType',
+    service: 'businessType',
+    sector: 'businessType',
     'business name': 'businessName',
-    'lead name': 'businessName',                              // ← this file's column
+    'lead name': 'businessName',
+    'business name/co name': 'businessName',
     'company name': 'businessName',
     'shop name': 'businessName',
     'business / person / shop / company name': 'businessName',
     'business/person/shop/company name': 'businessName',
+    'business person, shop, and company name': 'businessName',
+    business: 'businessName',
+    'contact person': 'contactPerson',
+    'point of contact': 'contactPerson',
     // ── Geography ───────────────────────────────────────────────────────────
     area: 'area',
     city: 'city',
+    place: 'area',
     // ── Phone ───────────────────────────────────────────────────────────────
     'phone number': 'phoneNumber',
-    'mobile number': 'phoneNumber',                           // ← THE critical fix
+    'mobile number': 'phoneNumber',
     'contact number': 'phoneNumber',
+    'contact number ': 'phoneNumber',
     'mobile no': 'phoneNumber',
+    'mobile no.': 'phoneNumber',
     'phone no': 'phoneNumber',
+    'phone no.': 'phoneNumber',
+    'contact no': 'phoneNumber',
+    'contact no.': 'phoneNumber',
     mobile: 'phoneNumber',
     phone: 'phoneNumber',
     contact: 'phoneNumber',
+    'alternate number(if any)': 'alternateNumber',
+    'alternate number (if any)': 'alternateNumber',
+    'alternate number': 'alternateNumber',
+    'alt number': 'alternateNumber',
     // ── Address ─────────────────────────────────────────────────────────────
     address: 'address',
     adress: 'address',                                        // tolerate template typo
-    'map location': 'address',                                // ← this file's column
-    'link address': 'address',
+    'map location': 'address',
     'map location link / address': 'address',
     'map location link/address': 'address',
+    'link address': 'address',
+    location: 'address',
     // ── Appointment ─────────────────────────────────────────────────────────
     'appointment date': 'appointmentDate',
     'appointment timings': 'appointmentTimings',
@@ -106,6 +125,13 @@ const HEADER_KEY_MAP = {
     // ── Delivery-specific ───────────────────────────────────────────────────
     'delivery date': 'deliveryDate',
     'delivery time': 'deliveryTime',
+    // Ignored columns
+    'sl no': 'ignore',
+    'sl. no': 'ignore',
+    's no': 'ignore',
+    's. no': 'ignore',
+    'serial no': 'ignore',
+    'serial number': 'ignore',
 };
 
 // Tier-2 fallback: strip all non-alphanumeric characters, lowercase.
@@ -118,25 +144,36 @@ const CANONICAL_HEADER_MAP = {
     agent: 'employeeName',
     businesstype: 'businessType',
     productservice: 'businessType',
+    sector: 'businessType',
     businessname: 'businessName',
     leadname: 'businessName',
+    businessnameconame: 'businessName',
     companyname: 'businessName',
     shopname: 'businessName',
     businesspersonshopcompanyname: 'businessName',
+    contactperson: 'contactPerson',
+    pointofcontact: 'contactPerson',
     area: 'area',
     city: 'city',
+    place: 'area',
     phonenumber: 'phoneNumber',
     mobilenumber: 'phoneNumber',
     contactnumber: 'phoneNumber',
     mobileno: 'phoneNumber',
     phoneno: 'phoneNumber',
+    contactno: 'phoneNumber',
     mobile: 'phoneNumber',
     phone: 'phoneNumber',
     contact: 'phoneNumber',
+    alternatenumberifany: 'alternateNumber',
+    alternatenumber: 'alternateNumber',
+    altnumber: 'alternateNumber',
+    secondarynumber: 'alternateNumber',
     address: 'address',
     adress: 'address',
     maplocation: 'address',
     linkaddress: 'address',
+    location: 'address',
     appointmentdate: 'appointmentDate',
     appointmenttimings: 'appointmentTimings',
     appointmenttime: 'appointmentTimings',
@@ -147,6 +184,11 @@ const CANONICAL_HEADER_MAP = {
     remark: 'remarks',
     deliverydate: 'deliveryDate',
     deliverytime: 'deliveryTime',
+    // Ignored columns
+    slno: 'ignore',
+    sno: 'ignore',
+    serialno: 'ignore',
+    serialnumber: 'ignore',
 };
 
 // Schema field labels for the upfront header validator error message.
@@ -172,9 +214,11 @@ const REQUIRED_SCHEMA_KEYS = new Set(['phoneNumber']);
 function toSchemaKeyedRow(normalizedRawRow) {
     const row = {};
     for (const [rawHeader, rawVal] of Object.entries(normalizedRawRow)) {
+        if (rawHeader.startsWith('_')) continue;
         // Tier 1: exact normalized header match
         const tier1Key = HEADER_KEY_MAP[rawHeader];
         if (tier1Key) {
+            if (tier1Key === 'ignore') continue;
             if (row[tier1Key] === undefined) row[tier1Key] = rawVal;
             continue;
         }
@@ -182,11 +226,34 @@ function toSchemaKeyedRow(normalizedRawRow) {
         const canonical = rawHeader.replace(/[^a-z0-9]/g, '');
         const tier2Key = CANONICAL_HEADER_MAP[canonical];
         if (tier2Key && row[tier2Key] === undefined) {
+            if (tier2Key === 'ignore') continue;
             row[tier2Key] = rawVal;
         }
         // Unrecognized columns are silently ignored (reported at file level)
     }
     return row;
+}
+
+function getSimilarity(s1, s2) {
+    const a = String(s1 || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const b = String(s2 || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (a === b) return 1.0;
+    const track = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+    for (let i = 0; i <= a.length; i += 1) track[0][i] = i;
+    for (let j = 0; j <= b.length; j += 1) track[j][0] = j;
+    for (let j = 1; j <= b.length; j += 1) {
+        for (let i = 1; i <= a.length; i += 1) {
+            const indicator = a[i - 1] === b[j - 1] ? 0 : 1;
+            track[j][i] = Math.min(
+                track[j][i - 1] + 1, // deletion
+                track[j - 1][i] + 1, // insertion
+                track[j - 1][i - 1] + indicator // substitution
+            );
+        }
+    }
+    const distance = track[b.length][a.length];
+    const maxLength = Math.max(a.length, b.length);
+    return maxLength === 0 ? 1.0 : 1.0 - distance / maxLength;
 }
 
 /**
@@ -209,7 +276,7 @@ function validateFileHeaders(rawRows) {
     }
 
     // Collect unique original (un-normalized) header names from the first row.
-    const originalHeaders = Object.keys(rawRows[0]);
+    const originalHeaders = Object.keys(rawRows[0]).filter(h => !h.startsWith('_'));
     const normalizedToOriginal = new Map();
     for (const h of originalHeaders) {
         const norm = h.toLowerCase().trim().replace(/\r?\n/g, ' ').replace(/\s+/g, ' ');
@@ -225,6 +292,7 @@ function validateFileHeaders(rawRows) {
         // Tier 1
         const tier1Key = HEADER_KEY_MAP[norm];
         if (tier1Key) {
+            if (tier1Key === 'ignore') continue;
             if (!resolvedKeys.has(tier1Key)) {
                 resolvedKeys.set(tier1Key, original);
                 // Report alias if original header differs from schema's canonical label
@@ -239,6 +307,7 @@ function validateFileHeaders(rawRows) {
         const canonical = norm.replace(/[^a-z0-9]/g, '');
         const tier2Key = CANONICAL_HEADER_MAP[canonical];
         if (tier2Key) {
+            if (tier2Key === 'ignore') continue;
             if (!resolvedKeys.has(tier2Key)) {
                 resolvedKeys.set(tier2Key, original);
                 const canonicalLabel = SCHEMA_FIELD_LABELS[tier2Key];
@@ -260,12 +329,30 @@ function validateFileHeaders(rawRows) {
     if (missingRequired.length > 0) {
         const foundList = originalHeaders.join(', ');
         const expectedList = Object.values(SCHEMA_FIELD_LABELS).join(', ');
+
+        // Find best suggestions from unmapped headers for each missing required column
+        let suggestions = '';
+        for (const missing of missingRequired) {
+            let bestMatch = null;
+            let highestSimilarity = 0.0;
+            for (const unmatched of unmappedHeaders) {
+                const sim = getSimilarity(missing, unmatched);
+                if (sim > highestSimilarity) {
+                    highestSimilarity = sim;
+                    bestMatch = unmatched;
+                }
+            }
+            if (highestSimilarity > 0.6 && bestMatch) {
+                suggestions += ` Did you mean '${bestMatch}'?`;
+            }
+        }
+
         const fatalError = {
             row: 0,
             code: 'FILE_STRUCTURE_ERROR',
             reason:
                 `This file doesn't match the Delivery Data template. ` +
-                `Missing required column: '${missingRequired.join("', '")}'. ` +
+                `Missing required column: '${missingRequired.join("', '")}'.${suggestions} ` +
                 `Found columns: ${foundList}. ` +
                 `Expected columns: ${expectedList}. ` +
                 `Please download the current template and re-upload.`,
@@ -329,7 +416,7 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
  *    batched (one query per key across the whole file), never per-row.
  */
 export const processDeliveryDataJob = async (job) => {
-    const { batchId, fileBufferBase64, verticalId, uploadedBy, fileExt = '.csv' } = job.data;
+    const { batchId, fileBufferBase64, verticalId, uploadedBy, fileExt = '.csv', sheetIndices = [0] } = job.data;
 
     let totalRows = 0;
     let successCount = 0;
@@ -342,7 +429,7 @@ export const processDeliveryDataJob = async (job) => {
 
     try {
         const buffer = Buffer.from(fileBufferBase64, 'base64');
-        const { rows, warnings: fileWarnings } = await parseUploadBuffer(buffer, fileExt);
+        const { rows, warnings: fileWarnings, sheetNames = [] } = await parseUploadBuffer(buffer, fileExt, sheetIndices);
         for (const w of fileWarnings) errors.push({ row: 0, code: 'FILE_WARNING', reason: w });
 
         totalRows = rows.length;
@@ -353,51 +440,6 @@ export const processDeliveryDataJob = async (job) => {
                 [batchId, JSON.stringify(errors)]);
             await emitProgress(batchId, uploadedBy, verticalId, 'done', 0, 0, errors, 0);
             return;
-        }
-
-        // ── Upfront header validation ─────────────────────────────────────────
-        // Runs BEFORE any row-level processing. If the required phone column
-        // cannot be found, aborts immediately with a single clear file-level
-        // error rather than N confusing "Mobile Number is required" row errors.
-        const headerCheck = validateFileHeaders(rows);
-        if (!headerCheck.ok) {
-            // Single file-level error — stop here, zero rows processed.
-            errors.push(headerCheck.fatalError);
-            await query(`
-                UPDATE csv_upload_logs
-                SET status = 'done', success_count = 0, failed_count = 0, duplicate_count = 0,
-                    errors = $2, processing_finished_at = NOW()
-                WHERE id = $1
-            `, [batchId, JSON.stringify(errors)]);
-            await emitProgress(batchId, uploadedBy, verticalId, 'done', totalRows, 0, errors, 0, 0);
-            return;
-        }
-        // Alias matches — transparent, non-blocking informational notices
-        for (const am of headerCheck.aliasMatches) {
-            errors.push({
-                row: 0,
-                code: 'ALIAS_MATCH',
-                reason: `Matched '${am.originalHeader}' → ${am.schemaLabel}`,
-                warning: true,
-            });
-        }
-        // Extra columns — informational, non-blocking
-        if (headerCheck.extraColumns.length > 0) {
-            errors.push({
-                row: 0,
-                code: 'FILE_WARNING',
-                reason: `Unrecognized columns ignored: ${headerCheck.extraColumns.join(', ')}`,
-                warning: true,
-            });
-        }
-        // Missing optional columns — informational
-        if (headerCheck.missingOptional.length > 0) {
-            errors.push({
-                row: 0,
-                code: 'FILE_WARNING',
-                reason: `Optional columns not found in file (will be blank): ${headerCheck.missingOptional.join(', ')}`,
-                warning: true,
-            });
         }
 
         const [agents, knownBusinessTypes] = await Promise.all([
@@ -412,8 +454,6 @@ export const processDeliveryDataJob = async (job) => {
         const uniquePhones = [...new Set(filePhones)];
         let existingDupKeys = new Set();
         if (uniquePhones.length > 0) {
-            // to_char formats the date server-side, in SQL — avoids any JS
-            // Date-object timezone-reinterpretation ambiguity entirely.
             const existingRes = await query(
                 `SELECT phone_number, to_char(delivery_date, 'YYYY-MM-DD') AS delivery_date_str, delivery_time
                  FROM delivery_data
@@ -432,69 +472,142 @@ export const processDeliveryDataJob = async (job) => {
         const businessNames = normalizedRows.map(r => r.businessName);
         const { phoneMap, nameMap } = await findLinkedRawDataBatch(verticalId, filePhones, businessNames);
 
-        const validRows = [];
-        rows.forEach((rawRow, idx) => {
-            const rowNum = idx + 2; // +2: header row + 1-based
-            const row = normalizedRows[idx];
-            const { errors: rowErrors, warnings: rowWarnings, assignedUserId, employeeNameRaw } = validateDeliveryDataRow(row, { agents, knownBusinessTypes });
-
-            for (const w of rowWarnings) warnings.push({ row: rowNum, field: w.field, reason: w.message });
-
-            if (rowErrors.length > 0) {
-                const reason = rowErrors.map(e => e.message).join('; ');
-                errors.push({ row: rowNum, code: ErrorCodes.VALIDATION_FAILED, field: rowErrors.length === 1 ? rowErrors[0].field : undefined, reason, originalRow: rawRow });
-                rowOutcomes.push({ row: rowNum, status: 'failed', reason });
-                return;
-            }
-
-            const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
-            const dupKey = deliveryDupKey(phone, row.deliveryDate, row.deliveryTime);
-            if (dupKeySet.has(dupKey)) {
-                duplicateCount++;
-                const reason = 'Duplicate: same phone number, delivery date, and delivery time already exists';
-                errors.push({ row: rowNum, code: ErrorCodes.DUPLICATE_RECORD, field: 'phoneNumber', reason, originalRow: rawRow });
-                rowOutcomes.push({ row: rowNum, status: 'duplicate', reason });
-                return;
-            }
-            dupKeySet.add(dupKey);
-
-            const linkResult = resolveLinkedRawDataId(phone, row.businessName, { phoneMap, nameMap });
-            if (linkResult.warning) warnings.push({ row: rowNum, field: 'linkedRawDataId', reason: linkResult.warning });
-
-            validRows.push({
-                id: crypto.randomUUID(),
-                vertical_id: verticalId,
-                assigned_user_id: assignedUserId,
-                date: toDateOrNull(row.date),
-                business_type: row.businessType || null,
-                business_name: row.businessName || null,
-                contact_person: row.contactPerson || null,
-                phone_number: phone,
-                alternate_number: row.alternateNumber || null,
-                area: row.area || null,
-                city: row.city || null,
-                address: row.address || null,
-                call_status: row.callStatus || null,
-                customer_response: row.customerResponse || null,
-                follow_up_required: row.followUpRequired || null,
-                follow_up_date: toDateOrNull(row.followUpDate),
-                follow_up_time: row.followUpTime || null,
-                next_action: row.nextAction || null,
-                remarks: row.remarks || null,
-                converted: row.converted || null,
-                appointment_date: toDateOrNull(row.appointmentDate),
-                appointment_timings: row.appointmentTimings || null,
-                delivery_date: toDateOrNull(row.deliveryDate),
-                delivery_time: row.deliveryTime || null,
-                linked_raw_data_id: linkResult.linkedRawDataId,
-                source: 'bulk_upload',
-                csv_batch_id: batchId,
-                created_by: uploadedBy,
-                employee_name_raw: employeeNameRaw || null,
-                csvRowNum: rowNum,
-                originalRow: rawRow,
-            });
+        const activeSheets = sheetNames.length > 0 ? sheetNames : ['Sheet 1'];
+        const sheetStats = new Map();
+        activeSheets.forEach(sheetName => {
+            sheetStats.set(sheetName, { success: 0, duplicates: 0, failed: 0, status: 'pending' });
         });
+
+        const validRows = [];
+
+        for (const sheetName of activeSheets) {
+            const sheetRows = sheetNames.length > 0 ? rows.filter(r => r._sheetName === sheetName) : rows;
+            const stats = sheetStats.get(sheetName);
+
+            if (sheetRows.length === 0) {
+                stats.status = 'empty';
+                errors.push({
+                    row: 0,
+                    code: 'SHEET_ERROR',
+                    reason: `Sheet "${sheetName}" is empty. No data imported.`,
+                    sheetName,
+                    warning: false
+                });
+                continue;
+            }
+
+            // Upfront header validation per sheet
+            const headerCheck = validateFileHeaders(sheetRows);
+            if (!headerCheck.ok) {
+                stats.status = 'failed';
+                errors.push({
+                    row: 0,
+                    code: 'SHEET_ERROR',
+                    reason: `Sheet "${sheetName}" failed template validation: ${headerCheck.fatalError.reason}`,
+                    sheetName,
+                    warning: false
+                });
+                continue;
+            }
+
+            // Match alias matched notices
+            for (const am of headerCheck.aliasMatches) {
+                errors.push({ row: 0, code: 'ALIAS_MATCH', reason: `Sheet "${sheetName}": Matched '${am.originalHeader}' → ${am.schemaLabel}`, sheetName, warning: true });
+            }
+            if (headerCheck.extraColumns.length > 0) {
+                errors.push({ row: 0, code: 'FILE_WARNING', reason: `Sheet "${sheetName}": Unrecognized columns ignored: ${headerCheck.extraColumns.join(', ')}`, sheetName, warning: true });
+            }
+            if (headerCheck.missingOptional.length > 0) {
+                errors.push({ row: 0, code: 'FILE_WARNING', reason: `Sheet "${sheetName}": Optional columns not found in file: ${headerCheck.missingOptional.join(', ')}`, sheetName, warning: true });
+            }
+
+            // Check if required phoneNumber column is present but entirely empty in all rows
+            const sheetNormalized = sheetRows.map(r => toSchemaKeyedRow(normalizeRowKeys(r)));
+            const hasAnyPhone = sheetNormalized.some(r => {
+                const val = r.phoneNumber;
+                return val !== undefined && val !== null && String(val).trim() !== '';
+            });
+
+            if (!hasAnyPhone) {
+                stats.status = 'failed';
+                errors.push({
+                    row: 0,
+                    code: 'COLUMN_EMPTY_ERROR',
+                    reason: `The 'Mobile Number' column was found in Sheet "${sheetName}" but is empty in all ${sheetRows.length} rows. Check that data is in the expected column, or that you selected the correct sheet.`,
+                    sheetName,
+                    warning: false
+                });
+                continue;
+            }
+
+            stats.status = 'processing';
+
+            sheetRows.forEach((rawRow, idx) => {
+                const rowNum = idx + 2; // +2: header row + 1-based index
+                const row = sheetNormalized[idx];
+                const { errors: rowErrors, warnings: rowWarnings, assignedUserId, employeeNameRaw } = validateDeliveryDataRow(row, { agents, knownBusinessTypes });
+
+                for (const w of rowWarnings) warnings.push({ row: rowNum, field: w.field, reason: `Sheet "${sheetName}": ${w.message}`, sheetName });
+
+                if (rowErrors.length > 0) {
+                    stats.failed++;
+                    const reason = rowErrors.map(e => e.message).join('; ');
+                    errors.push({ row: rowNum, code: ErrorCodes.VALIDATION_FAILED, field: rowErrors.length === 1 ? rowErrors[0].field : undefined, reason, originalRow: rawRow, sheetName });
+                    rowOutcomes.push({ row: rowNum, status: 'failed', reason, sheetName });
+                    return;
+                }
+
+                const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
+                const dupKey = deliveryDupKey(phone, row.deliveryDate, row.deliveryTime);
+                if (dupKeySet.has(dupKey)) {
+                    duplicateCount++;
+                    stats.duplicates++;
+                    const reason = 'Duplicate: same phone number, delivery date, and delivery time already exists';
+                    errors.push({ row: rowNum, code: ErrorCodes.DUPLICATE_RECORD, field: 'phoneNumber', reason, originalRow: rawRow, sheetName });
+                    rowOutcomes.push({ row: rowNum, status: 'duplicate', reason, sheetName });
+                    return;
+                }
+                dupKeySet.add(dupKey);
+
+                const linkResult = resolveLinkedRawDataId(phone, row.businessName, { phoneMap, nameMap });
+                if (linkResult.warning) warnings.push({ row: rowNum, field: 'linkedRawDataId', reason: `Sheet "${sheetName}": ${linkResult.warning}`, sheetName });
+
+                validRows.push({
+                    id: crypto.randomUUID(),
+                    vertical_id: verticalId,
+                    assigned_user_id: assignedUserId,
+                    date: toDateOrNull(row.date),
+                    business_type: row.businessType || null,
+                    business_name: row.businessName || null,
+                    contact_person: row.contactPerson || null,
+                    phone_number: phone,
+                    alternate_number: row.alternateNumber || null,
+                    area: row.area || null,
+                    city: row.city || null,
+                    address: row.address || null,
+                    call_status: row.callStatus || null,
+                    customer_response: row.customerResponse || null,
+                    follow_up_required: row.followUpRequired || null,
+                    follow_up_date: toDateOrNull(row.followUpDate),
+                    follow_up_time: row.followUpTime || null,
+                    next_action: row.nextAction || null,
+                    remarks: row.remarks || null,
+                    converted: row.converted || null,
+                    appointment_date: toDateOrNull(row.appointmentDate),
+                    appointment_timings: row.appointmentTimings || null,
+                    delivery_date: toDateOrNull(row.deliveryDate),
+                    delivery_time: row.deliveryTime || null,
+                    linked_raw_data_id: linkResult.linkedRawDataId,
+                    source: 'bulk_upload',
+                    csv_batch_id: batchId,
+                    created_by: uploadedBy,
+                    employee_name_raw: employeeNameRaw || null,
+                    csvRowNum: rowNum,
+                    originalRow: rawRow,
+                    _sheetName: sheetName
+                });
+            });
+        }
 
         for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
             const chunk = validRows.slice(i, i + BATCH_SIZE);
@@ -503,7 +616,10 @@ export const processDeliveryDataJob = async (job) => {
                 const inserted = await bulkInsert({ query }, 'delivery_data', DELIVERY_DATA_COLUMNS, chunkRows, { onConflict: '' });
                 successCount += inserted.length;
                 for (const r of chunk) {
-                    rowOutcomes.push({ row: r.csvRowNum, status: 'success', id: r.id });
+                    rowOutcomes.push({ row: r.csvRowNum, status: 'success', id: r.id, sheetName: r._sheetName });
+                    if (sheetStats.has(r._sheetName)) {
+                        sheetStats.get(r._sheetName).success++;
+                    }
                 }
             } catch (chunkErr) {
                 // Fall back row-by-row so one bad row never sinks the whole chunk.
@@ -511,18 +627,27 @@ export const processDeliveryDataJob = async (job) => {
                     try {
                         await bulkInsert({ query }, 'delivery_data', DELIVERY_DATA_COLUMNS, [DELIVERY_DATA_COLUMNS.map(c => r[c])], { onConflict: '' });
                         successCount += 1;
-                        rowOutcomes.push({ row: r.csvRowNum, status: 'success', id: r.id });
+                        rowOutcomes.push({ row: r.csvRowNum, status: 'success', id: r.id, sheetName: r._sheetName });
+                        if (sheetStats.has(r._sheetName)) {
+                            sheetStats.get(r._sheetName).success++;
+                        }
                     } catch (singleErr) {
                         const rawErr = singleErr.cause || singleErr;
                         const isDup = rawErr.code === '23505';
                         const reason = isDup ? 'Duplicate: same phone number, delivery date, and delivery time already exists' : rawErr.message;
                         if (isDup) {
                             duplicateCount++;
-                            errors.push({ row: r.csvRowNum, code: ErrorCodes.DUPLICATE_RECORD, field: 'phoneNumber', reason, originalRow: r.originalRow });
-                            rowOutcomes.push({ row: r.csvRowNum, status: 'duplicate', reason });
+                            if (sheetStats.has(r._sheetName)) {
+                                sheetStats.get(r._sheetName).duplicates++;
+                            }
+                            errors.push({ row: r.csvRowNum, code: ErrorCodes.DUPLICATE_RECORD, field: 'phoneNumber', reason, originalRow: r.originalRow, sheetName: r._sheetName });
+                            rowOutcomes.push({ row: r.csvRowNum, status: 'duplicate', reason, sheetName: r._sheetName });
                         } else {
-                            errors.push({ row: r.csvRowNum, code: ErrorCodes.DB_CONSTRAINT, reason: `Insert failed for ${r.business_name}: ${reason}`, originalRow: r.originalRow });
-                            rowOutcomes.push({ row: r.csvRowNum, status: 'failed', reason });
+                            if (sheetStats.has(r._sheetName)) {
+                                sheetStats.get(r._sheetName).failed++;
+                            }
+                            errors.push({ row: r.csvRowNum, code: ErrorCodes.DB_CONSTRAINT, reason: `Insert failed for ${r.business_name}: ${reason}`, originalRow: r.originalRow, sheetName: r._sheetName });
+                            rowOutcomes.push({ row: r.csvRowNum, status: 'failed', reason, sheetName: r._sheetName });
                         }
                     }
                 }
@@ -530,9 +655,32 @@ export const processDeliveryDataJob = async (job) => {
             await emitProgress(batchId, uploadedBy, verticalId, 'processing', totalRows, successCount, errors, duplicateCount);
         }
 
+        // Add SHEET_SUMMARY items to errors
+        sheetStats.forEach((stats, name) => {
+            if (stats.status === 'processing') {
+                stats.status = 'done';
+            }
+            if (stats.status === 'done' || stats.status === 'failed' || stats.status === 'empty') {
+                errors.push({
+                    row: 0,
+                    code: 'SHEET_SUMMARY',
+                    reason: stats.status === 'empty'
+                        ? `Sheet "${name}": Skipped (empty)`
+                        : stats.status === 'failed' && stats.success === 0 && stats.failed === 0
+                        ? `Sheet "${name}": Skipped (failed validation)`
+                        : `Sheet "${name}": ${stats.success} imported, ${stats.duplicates} duplicates, ${stats.failed} errors`,
+                    sheetName: name,
+                    successCount: stats.success,
+                    duplicateCount: stats.duplicates,
+                    failedCount: stats.failed,
+                    status: stats.status
+                });
+            }
+        });
+
         const outcomeSuccess = rowOutcomes.filter(o => o.status === 'success').length;
         const outcomeDuplicate = rowOutcomes.filter(o => o.status === 'duplicate').length;
-        const outcomeFailed = rowOutcomes.filter(o => o.status === 'failed').length;
+        const outcomeFailed = rowOutcomes.filter(o => o.status === 'failed' || o.status === 'sheet_failed').length;
         const outcomeTotal = outcomeSuccess + outcomeDuplicate + outcomeFailed;
 
         console.log(`[DeliveryData Processor] Batch final report: total=${totalRows}, outcomes=${outcomeTotal} (success=${outcomeSuccess}, duplicates=${outcomeDuplicate}, failed=${outcomeFailed})`);
@@ -540,11 +688,6 @@ export const processDeliveryDataJob = async (job) => {
             console.error(`[DeliveryData Processor] MISMATCH warning: totalRows (${totalRows}) !== outcomeTotal (${outcomeTotal})`);
         }
 
-        // Cached snapshot matches the persisted DB report exactly (merged
-        // errors+warnings); real failed-row count passed explicitly so
-        // warnings never inflate it — see emitProgress's comment above.
-        // (Also collapses what used to be two identical, redundant
-        // emitProgress('done', ...) calls back to back into one.)
         const persistedEntries = [...errors, ...warnings.map(w => ({ ...w, warning: true }))];
         await query(`
             UPDATE csv_upload_logs

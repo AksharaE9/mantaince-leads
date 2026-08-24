@@ -54,6 +54,15 @@ async function startImportWorkerLoop() {
       }
 
       const fileBuffer = fs.readFileSync(filePath);
+      let sheetIndices = [0];
+      try {
+        if (log.sheet_indices) {
+          sheetIndices = Array.isArray(log.sheet_indices)
+            ? log.sheet_indices
+            : JSON.parse(log.sheet_indices);
+        }
+      } catch { /* fallback to [0] */ }
+
       const mockJob = {
         data: {
           batchId: log.id,
@@ -63,7 +72,8 @@ async function startImportWorkerLoop() {
           uploadedBy: log.uploaded_by,
           assignedTo: log.assigned_to,
           leadType: log.lead_type || 'CALL',
-          fileExt: path.extname(log.file_name || '') || '.csv'
+          fileExt: path.extname(log.file_name || '') || '.csv',
+          sheetIndices
         },
         progress: async (value) => {
           console.log(`[Worker] Job ${log.id} progress: ${value}%`);

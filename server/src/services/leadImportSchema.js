@@ -50,7 +50,13 @@ export const BASE_FIELDS_CALL = [
     { key: 'followUpRemarks', label: 'Follow Up Remarks', csvHeader: 'FOLLOW UP REMARKS', type: 'string', required: false },
 ];
 
-export const BASE_FIELDS_POSITIVE = [...BASE_FIELDS_CALL];
+export const BASE_FIELDS_POSITIVE = [
+    ...BASE_FIELDS_CALL,
+    { key: 'positive', label: 'Positive(Y/N)', csvHeader: 'POSITIVE(Y/N)', type: 'string', required: false },
+    { key: 'converted', label: 'Converted (Y/N)', csvHeader: 'CONVERTED (Y/N)', type: 'string', required: false },
+    { key: 'appointmentDate', label: 'Appointment Date', csvHeader: 'APPOINTMENT DATE', type: 'string', required: false },
+    { key: 'appointmentTime', label: 'Appointment Time', csvHeader: 'APPOINTMENT TIME', type: 'string', required: false },
+];
 
 // field_configs.field_type values (see CreateFieldConfigBody in validators/index.js)
 // that carry a fixed option list and should render as a dropdown in the template.
