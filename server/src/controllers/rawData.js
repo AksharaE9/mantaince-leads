@@ -481,3 +481,137 @@ export const uploadRawDataCsv = async (req, res) => {
         return sendControllerError(res, error, 'uploadRawDataCsv', { section: 'raw_data', operation: 'bulk_upload' });
     }
 };
+
+export const updateRawData = async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+    try {
+        if (!isValidUUID(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid record ID' });
+        }
+
+        const rawDataRes = await query('SELECT * FROM raw_data WHERE id = $1 AND is_deleted = false', [id]);
+        const record = rawDataRes.rows[0];
+        if (!record) {
+            return res.status(404).json({ success: false, error: 'Raw Data record not found' });
+        }
+
+        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(record.vertical_id))) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+
+        const row = {
+            date: updates.date !== undefined ? updates.date : record.date,
+            employeeName: updates.employeeName !== undefined ? updates.employeeName : record.employee_name_raw,
+            productService: updates.productService !== undefined ? updates.productService : record.product_service,
+            leadName: updates.leadName !== undefined ? updates.leadName : record.lead_name,
+            contactPerson: updates.contactPerson !== undefined ? updates.contactPerson : record.contact_person,
+            phoneNumber: updates.phoneNumber !== undefined ? updates.phoneNumber : record.phone_number,
+            alternateNumber: updates.alternateNumber !== undefined ? updates.alternateNumber : record.alternate_number,
+            city: updates.city !== undefined ? updates.city : record.city,
+            area: updates.area !== undefined ? updates.area : record.area,
+            mapLocation: updates.mapLocation !== undefined ? updates.mapLocation : record.map_location,
+            callStatus: updates.callStatus !== undefined ? updates.callStatus : record.call_status,
+            customerResponse: updates.customerResponse !== undefined ? updates.customerResponse : record.customer_response,
+            followUpRequired: updates.followUpRequired !== undefined ? updates.followUpRequired : record.follow_up_required,
+            followUpDate: updates.followUpDate !== undefined ? updates.followUpDate : record.follow_up_date,
+            followUpTime: updates.followUpTime !== undefined ? updates.followUpTime : record.follow_up_time,
+            nextAction: updates.nextAction !== undefined ? updates.nextAction : record.next_action,
+            remarks: updates.remarks !== undefined ? updates.remarks : record.remarks,
+            converted: updates.converted !== undefined ? updates.converted : record.converted,
+        };
+
+        const [agents, knownBusinessTypes] = await Promise.all([
+            getAssignableAgents(record.vertical_id),
+            getKnownBusinessTypes(record.vertical_id),
+        ]);
+
+        const { errors, warnings, assignedUserId, employeeNameRaw } = validateRawDataRow(row, { agents, knownBusinessTypes });
+        if (errors.length > 0) {
+            return res.status(422).json({
+                success: false,
+                error: errors.map(e => e.message).join('; '),
+                fields: errors
+            });
+        }
+
+        const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
+        const effectiveSubVerticalId = updates.subVerticalId !== undefined ? updates.subVerticalId : record.sub_vertical_id;
+        let dupRes;
+        if (effectiveSubVerticalId) {
+            dupRes = await query(
+                'SELECT id, lead_name, business_name, contact_person FROM raw_data WHERE vertical_id = $1 AND sub_vertical_id = $2 AND phone_number = $3 AND id <> $4 AND is_deleted = false LIMIT 1',
+                [record.vertical_id, effectiveSubVerticalId, phone, id]
+            );
+        } else {
+            dupRes = await query(
+                'SELECT id, lead_name, business_name, contact_person FROM raw_data WHERE vertical_id = $1 AND phone_number = $2 AND id <> $3 AND is_deleted = false LIMIT 1',
+                [record.vertical_id, phone, id]
+            );
+        }
+        if (dupRes.rows.length > 0) {
+            const conflictName = dupRes.rows[0].lead_name || dupRes.rows[0].business_name || dupRes.rows[0].contact_person || 'existing record';
+            return res.status(409).json({
+                success: false,
+                error: `Mobile number ${phone} already exists in Raw Data for this section (conflicts with "${conflictName}")`
+            });
+        }
+
+        const followUpDateVal = parseFlexibleDate(row.followUpDate);
+        const dateVal = parseFlexibleDate(row.date);
+
+        const updateRes = await query(`
+            UPDATE raw_data SET
+                sub_vertical_id = $2, assigned_user_id = $3, date = $4,
+                product_service = $5, lead_name = $6, contact_person = $7, phone_number = $8, alternate_number = $9,
+                city = $10, area = $11, map_location = $12, call_status = $13, customer_response = $14,
+                follow_up_required = $15, follow_up_date = $16, follow_up_time = $17, next_action = $18,
+                remarks = $19, converted = $20, business_type = $21, business_name = $22, address = $23,
+                appointment_date = $24, appointment_timings = $25, employee_name_raw = $26, updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+        `, [
+            id, effectiveSubVerticalId || null, assignedUserId || null, dateVal,
+            row.productService || null, row.leadName || null, row.contactPerson || null, phone, row.alternateNumber || null,
+            row.city || null, row.area || null, row.mapLocation || null, row.callStatus || null, row.customerResponse || null,
+            row.followUpRequired || null, followUpDateVal, row.followUpTime || null, row.nextAction || null,
+            row.remarks || null, row.converted || null, row.productService || null, row.leadName || null, row.mapLocation || null,
+            followUpDateVal, row.followUpTime || null, employeeNameRaw || null
+        ]);
+
+        await logAudit(req, { action: 'raw_data.update', targetCollection: 'raw_data', targetId: id, before: record, after: updateRes.rows[0] });
+        broadcastToAll({ type: 'RAW_DATA_MUTATED', verticalId: record.vertical_id, action: 'update' });
+
+        return res.status(200).json({ success: true, data: updateRes.rows[0], warnings });
+    } catch (error) {
+        return sendControllerError(res, error, 'updateRawData', { section: 'raw_data', operation: 'single_update', recordId: id });
+    }
+};
+
+export const deleteRawData = async (req, res) => {
+    const { id } = req.params;
+    try {
+        if (!isValidUUID(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid record ID' });
+        }
+
+        const rawDataRes = await query('SELECT * FROM raw_data WHERE id = $1 AND is_deleted = false', [id]);
+        const record = rawDataRes.rows[0];
+        if (!record) {
+            return res.status(404).json({ success: false, error: 'Raw Data record not found' });
+        }
+
+        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(record.vertical_id))) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+
+        const deleteRes = await query('UPDATE raw_data SET is_deleted = true, updated_at = NOW() WHERE id = $1 RETURNING *', [id]);
+
+        await logAudit(req, { action: 'raw_data.delete', targetCollection: 'raw_data', targetId: id, before: record });
+        broadcastToAll({ type: 'RAW_DATA_MUTATED', verticalId: record.vertical_id, action: 'delete' });
+
+        return res.status(200).json({ success: true, data: deleteRes.rows[0] });
+    } catch (error) {
+        return sendControllerError(res, error, 'deleteRawData', { section: 'raw_data', operation: 'delete', recordId: id });
+    }
+};

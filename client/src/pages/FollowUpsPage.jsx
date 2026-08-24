@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   ClipboardList, User, Clock, Calendar as CalendarIcon,
   MessageSquare, Plus, Filter, ChevronLeft, ChevronRight,
-  ExternalLink, CheckCircle2, X, Search, Download
+  ExternalLink, CheckCircle2, X, Search, Download, Trash2, Edit
 } from 'lucide-react';
 import axios from '../api/axios.js';
 import { useUiStore } from '../store/uiStore.js';
@@ -30,6 +30,8 @@ export const FollowUpsPage = () => {
   const [selectedAgent, setSelectedAgent] = useState(null);
 
   const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
+
+  const [editingFollowUp, setEditingFollowUp] = useState(null);
 
   // Local Filter scopes
   const [verticals, setVerticals] = useState([]);
@@ -221,6 +223,45 @@ export const FollowUpsPage = () => {
       fetchStats();
     } catch (err) {
       toast.error('Failed to update follow-up');
+    }
+  };
+
+  const handleUpdateFollowUpSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingFollowUp.description?.trim()) {
+      toast.error('Agenda/Description is required');
+      return;
+    }
+    if (!editingFollowUp.follow_up_date) {
+      toast.error('Date/Time is required');
+      return;
+    }
+    try {
+      await axios.put(`/api/v1/followUps/follow-ups/${editingFollowUp.id}`, {
+        assignedToId: editingFollowUp.assigned_to_id || null,
+        followUpDate: new Date(editingFollowUp.follow_up_date).toISOString(),
+        description: editingFollowUp.description,
+        status: editingFollowUp.status,
+        completedNote: editingFollowUp.status === 'COMPLETED' ? (editingFollowUp.completed_note || '') : null,
+      });
+      toast.success('Follow-up updated successfully!');
+      setEditingFollowUp(null);
+      fetchFollowUps();
+      fetchStats();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update follow-up');
+    }
+  };
+
+  const handleDeleteFollowUp = async (fId) => {
+    if (!window.confirm('Are you sure you want to delete this follow-up?')) return;
+    try {
+      await axios.delete(`/api/v1/followUps/follow-ups/${fId}`);
+      toast.success('Follow-up deleted');
+      fetchFollowUps();
+      fetchStats();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete follow-up');
     }
   };
 
@@ -522,6 +563,15 @@ export const FollowUpsPage = () => {
                         key={item.id} 
                         item={item} 
                         onComplete={handleMarkCompleted}
+                        onEdit={(record) => setEditingFollowUp({
+                          id: record.id,
+                          assigned_to_id: record.assigned_to_id || record.assigned_to || '',
+                          follow_up_date: record.follow_up_date ? record.follow_up_date.slice(0, 16) : '',
+                          description: record.description || '',
+                          status: record.status || 'PENDING',
+                          completed_note: record.completed_note || '',
+                        })}
+                        onDelete={handleDeleteFollowUp}
                         isAdmin={isAdmin}
                       />
                     ))}
@@ -532,11 +582,108 @@ export const FollowUpsPage = () => {
           </div>
         </div>
       )}
+      {editingFollowUp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">
+          <div className="glass-panel w-full max-w-md p-6 bg-white border border-[--border] text-[--text-primary] shadow-xl rounded-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[--border] pb-3">
+              <h3 className="text-lg font-bold text-[--text-primary] flex items-center gap-2">
+                <CalendarIcon className="text-[--accent]" size={20} />
+                <span>Edit Follow-Up Visit</span>
+              </h3>
+              <button onClick={() => setEditingFollowUp(null)} className="p-1 border border-[--border-strong] rounded text-[--text-secondary] hover:bg-stone-50">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateFollowUpSubmit} className="space-y-4">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-black uppercase text-[--text-secondary]">Assignee Agent *</span>
+                <select
+                  className="w-full"
+                  value={editingFollowUp.assigned_to_id}
+                  onChange={(e) => setEditingFollowUp({ ...editingFollowUp, assigned_to_id: e.target.value })}
+                >
+                  <option value="">-- Unassigned --</option>
+                  {agents.map((a) => (
+                    <option key={a.id || a._id} value={a.id || a._id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-Up Date & Time *</span>
+                <input
+                  type="datetime-local"
+                  required
+                  className="w-full"
+                  value={editingFollowUp.follow_up_date}
+                  onChange={(e) => setEditingFollowUp({ ...editingFollowUp, follow_up_date: e.target.value })}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-black uppercase text-[--text-secondary]">Visit Description / Agenda *</span>
+                <textarea
+                  required
+                  rows={3}
+                  className="w-full"
+                  placeholder="Detail the instructions or agenda..."
+                  value={editingFollowUp.description}
+                  onChange={(e) => setEditingFollowUp({ ...editingFollowUp, description: e.target.value })}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-black uppercase text-[--text-secondary]">Status *</span>
+                <select
+                  className="w-full"
+                  value={editingFollowUp.status}
+                  onChange={(e) => setEditingFollowUp({ ...editingFollowUp, status: e.target.value })}
+                >
+                  <option value="PENDING">PENDING</option>
+                  <option value="COMPLETED">COMPLETED</option>
+                  <option value="MISSED">MISSED</option>
+                </select>
+              </div>
+
+              {editingFollowUp.status === 'COMPLETED' && (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-black uppercase text-[--text-secondary]">Completion Note *</span>
+                  <textarea
+                    required
+                    rows={3}
+                    className="w-full"
+                    placeholder="Visit outcome report notes..."
+                    value={editingFollowUp.completed_note}
+                    onChange={(e) => setEditingFollowUp({ ...editingFollowUp, completed_note: e.target.value })}
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-[--border]">
+                <button
+                  type="button"
+                  onClick={() => setEditingFollowUp(null)}
+                  className="px-4 py-2 border border-[--border-strong] hover:bg-stone-50 rounded-lg text-xs font-semibold text-[--text-secondary]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-[--accent] text-white hover:bg-[--accent-hover] rounded-lg text-xs font-bold shadow-sm"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-const FollowUpCard = ({ item, onComplete, isAdmin }) => {
+const FollowUpCard = ({ item, onComplete, onEdit, onDelete, isAdmin }) => {
   const [showCompleteForm, setShowCompleteForm] = useState(false);
   const [note, setNote] = useState('');
   const [nextDate, setNextDate] = useState('');
@@ -626,15 +773,42 @@ const FollowUpCard = ({ item, onComplete, isAdmin }) => {
             </div>
           )}
 
-          {isPending && !showCompleteForm && (
-            <button
-              onClick={() => setShowCompleteForm(true)}
-              className="px-6 py-2.5 bg-white border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-600 hover:text-white font-black text-xs rounded-xl transition-all shadow-sm flex items-center gap-2 uppercase tracking-wider"
-            >
-              <CheckCircle2 size={16} />
-              <span>Record Visit Outcome</span>
-            </button>
-          )}
+          <div className="flex gap-3 items-center mt-4 flex-wrap">
+            {isPending && !showCompleteForm && (
+              <button
+                onClick={() => setShowCompleteForm(true)}
+                className="px-6 py-2.5 bg-white border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-600 hover:text-white font-black text-xs rounded-xl transition-all shadow-sm flex items-center gap-2 uppercase tracking-wider"
+              >
+                <CheckCircle2 size={16} />
+                <span>Record Visit Outcome</span>
+              </button>
+            )}
+
+            {!showCompleteForm && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onEdit(item)}
+                  className="px-4 py-2 bg-white border border-stone-200 text-stone-600 hover:bg-stone-50 font-bold text-xs rounded-xl transition-all flex items-center gap-2 uppercase tracking-wider"
+                  title="Edit scheduled follow-up details"
+                >
+                  <Edit size={14} className="text-stone-500" />
+                  <span>Edit</span>
+                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(item.id)}
+                    className="px-4 py-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 font-bold text-xs rounded-xl transition-all flex items-center gap-2 uppercase tracking-wider"
+                    title="Cancel/Delete follow-up record"
+                  >
+                    <Trash2 size={14} />
+                    <span>Delete</span>
+                  </button>
+                )}
+              </>
+            )}
+          </div>
 
           {showCompleteForm && (
             <div className="bg-white border-2 border-emerald-100 rounded-2xl p-6 shadow-lg animate-in slide-in-from-top-4 duration-300">

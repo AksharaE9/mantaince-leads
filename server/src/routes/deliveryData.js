@@ -7,6 +7,8 @@ import {
   getDeliveryDataSchema,
   uploadDeliveryDataCsv,
   exportDeliveryDataCsv,
+  updateDeliveryData,
+  deleteDeliveryData,
 } from '../controllers/deliveryData.js';
 import { getCsvLogs, getCsvLogById, streamFailedRows } from '../controllers/csv.js';
 import authenticate from '../middleware/authenticate.js';
@@ -45,6 +47,8 @@ router.use(attachRole);
 // needs a manual grant to use it (see RBAC note in CLAUDE.md).
 router.get('/', checkPermission(['leads:read', 'leads:read_own']), getDeliveryData);
 router.post('/', checkPermission('leads:create'), createDeliveryData);
+router.patch('/:id', checkPermission(['leads:update', 'leads:update_own']), updateDeliveryData);
+router.delete('/:id', checkPermission(['leads:delete', 'leads:delete_own']), deleteDeliveryData);
 router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exportDeliveryDataCsv);
 
 router.get('/import-template', checkPermission('csv:template'), downloadDeliveryDataTemplate);

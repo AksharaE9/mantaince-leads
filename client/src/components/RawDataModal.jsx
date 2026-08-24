@@ -56,7 +56,8 @@ export default function RawDataModal({
   defaultSubVerticalId = '',
   agents = [],
   onSaved,
-  initialMode = 'single'
+  initialMode = 'single',
+  record
 }) {
   const [mode, setMode] = useState(initialMode); // 'single' | 'bulk'
   const [form, setForm] = useState(emptyForm);
@@ -66,15 +67,47 @@ export default function RawDataModal({
 
   useEffect(() => {
     if (open) {
-      setMode(initialMode);
-      setForm((prev) => ({
-        ...emptyForm,
-        subVerticalId: defaultSubVerticalId || (subVerticals.length === 1 ? subVerticals[0]._id : ''),
-      }));
-      setAssignedTo('');
+      if (record) {
+        setMode('single');
+        setForm({
+          date: record.date ? record.date.slice(0, 10) : '',
+          subVerticalId: record.subVerticalId?._id || record.subVerticalId || record.sub_vertical_id || '',
+          productService: record.product_service || record.productService || record.business_type || '',
+          leadName: record.lead_name || record.leadName || record.business_name || '',
+          contactPerson: record.contactPerson || record.contact_person || '',
+          phoneNumber: record.phoneNumber || record.phone_number || '',
+          alternateNumber: record.alternateNumber || record.alternate_number || '',
+          city: record.city || '',
+          area: record.area || '',
+          mapLocation: record.mapLocation || record.map_location || record.address || '',
+          callStatus: record.callStatus || record.call_status || '',
+          customerResponse: record.customerResponse || record.customer_response || '',
+          followUpRequired: record.followUpRequired || record.follow_up_required || '',
+          followUpDate: record.follow_up_date || record.followUpDate || record.appointment_date 
+            ? String(record.follow_up_date || record.followUpDate || record.appointment_date).slice(0, 10) 
+            : '',
+          followUpTime: record.followUpTime || record.follow_up_time || record.appointment_timings || '',
+          nextAction: record.nextAction || record.next_action || '',
+          remarks: record.remarks || '',
+          converted: record.converted || '',
+        });
+        const matchedAgent = agents.find(
+          (a) => (a.id || a._id) === (record.assigned_user_id || record.assignedTo) ||
+                 a.name === record.assignee_name ||
+                 a.name === record.employee_name_raw
+        );
+        setAssignedTo(matchedAgent ? (matchedAgent.id || matchedAgent._id) : '');
+      } else {
+        setMode(initialMode);
+        setForm((prev) => ({
+          ...emptyForm,
+          subVerticalId: defaultSubVerticalId || (subVerticals.length === 1 ? subVerticals[0]._id : ''),
+        }));
+        setAssignedTo('');
+      }
       setFieldErrors([]);
     }
-  }, [open, initialMode, defaultSubVerticalId, subVerticals]);
+  }, [open, initialMode, defaultSubVerticalId, subVerticals, record, agents]);
 
   if (!open) return null;
 
@@ -95,16 +128,23 @@ export default function RawDataModal({
     setSaving(true);
     setFieldErrors([]);
     try {
-      const res = await axios.post('/api/v1/raw-data', {
+      const payload = {
         verticalId: vertical._id,
         ...form,
         subVerticalId: form.subVerticalId || undefined,
         employeeName: selectedAgentName,
-      });
+      };
+      let res;
+      if (record) {
+        res = await axios.patch(`/api/v1/raw-data/${record.id || record._id}`, payload);
+        toast.success('Raw data record updated successfully.');
+      } else {
+        res = await axios.post('/api/v1/raw-data', payload);
+        toast.success('Raw data record saved successfully.');
+      }
       if (res.data.warnings?.length) {
         res.data.warnings.forEach((w) => toast(w.message, { icon: '⚠️' }));
       }
-      toast.success('Raw data record saved successfully.');
       onSaved?.();
       handleClose();
     } catch (err) {
@@ -144,29 +184,31 @@ export default function RawDataModal({
         <div className="flex items-center justify-between border-b border-[--border] pb-3">
           <h3 className="text-lg font-bold text-[--text-primary] flex items-center gap-2">
             <Database className="text-[--accent]" size={20} />
-            <span>Add Raw Data Record</span>
+            <span>{record ? 'Edit Raw Data Record' : 'Add Raw Data Record'}</span>
           </h3>
           <button onClick={handleClose} className="p-1 border border-[--border-strong] rounded text-[--text-secondary] hover:bg-stone-50">
             <X size={16} />
           </button>
         </div>
 
-        <div className="flex gap-2 border-b border-[--border] pb-3">
-          <button
-            type="button"
-            onClick={() => setMode('single')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'single' ? 'bg-[--accent] text-white' : 'bg-stone-100 text-[--text-secondary]'}`}
-          >
-            Single Add
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('bulk')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'bulk' ? 'bg-[--accent] text-white' : 'bg-stone-100 text-[--text-secondary]'}`}
-          >
-            Bulk Upload
-          </button>
-        </div>
+        {!record && (
+          <div className="flex gap-2 border-b border-[--border] pb-3">
+            <button
+              type="button"
+              onClick={() => setMode('single')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'single' ? 'bg-[--accent] text-white' : 'bg-stone-100 text-[--text-secondary]'}`}
+            >
+              Single Add
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('bulk')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'bulk' ? 'bg-[--accent] text-white' : 'bg-stone-100 text-[--text-secondary]'}`}
+            >
+              Bulk Upload
+            </button>
+          </div>
+        )}
 
         {fieldErrors.length > 0 && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-600 space-y-1">

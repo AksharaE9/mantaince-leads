@@ -41,19 +41,56 @@ const FormField = ({ label, required, children }) => (
  * Delivery Data is an independent sibling of Raw Data (own table, own
  * endpoints) — it is not merged into Raw Data's form or table.
  */
-export default function DeliveryDataModal({ open, onClose, vertical, agents = [], onSaved, initialMode = 'single' }) {
+export default function DeliveryDataModal({ open, onClose, vertical, agents = [], onSaved, initialMode = 'single', record }) {
   const [mode, setMode] = useState(initialMode); // 'single' | 'bulk'
   const [form, setForm] = useState(emptyForm);
   const [assignedTo, setAssignedTo] = useState('');
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState([]);
 
-  // Re-apply initialMode each time the modal opens — a single mounted
-  // instance is reused for both "Add" (initialMode="single") and "Import"
-  // (initialMode="bulk") toolbar buttons in DataSectionPage.
   useEffect(() => {
-    if (open) setMode(initialMode);
-  }, [open, initialMode]);
+    if (open) {
+      if (record) {
+        setMode('single');
+        setForm({
+          date: record.date ? record.date.slice(0, 10) : '',
+          businessType: record.business_type || record.businessType || '',
+          businessName: record.business_name || record.businessName || '',
+          contactPerson: record.contact_person || record.contactPerson || '',
+          phoneNumber: record.phone_number || record.phoneNumber || '',
+          alternateNumber: record.alternate_number || record.alternateNumber || '',
+          city: record.city || '',
+          area: record.area || '',
+          address: record.address || '',
+          callStatus: record.call_status || record.callStatus || '',
+          customerResponse: record.customer_response || record.customerResponse || '',
+          followUpRequired: record.follow_up_required || record.followUpRequired || '',
+          followUpDate: record.follow_up_date || record.followUpDate || record.appointment_date 
+            ? String(record.follow_up_date || record.followUpDate || record.appointment_date).slice(0, 10) 
+            : '',
+          followUpTime: record.follow_up_time || record.followUpTime || record.appointment_timings || '',
+          nextAction: record.next_action || record.nextAction || '',
+          remarks: record.remarks || '',
+          converted: record.converted || '',
+          deliveryDate: record.delivery_date || record.deliveryDate 
+            ? String(record.delivery_date || record.deliveryDate).slice(0, 10) 
+            : '',
+          deliveryTime: record.delivery_time || record.deliveryTime || '',
+        });
+        const matchedAgent = agents.find(
+          (a) => (a.id || a._id) === (record.assigned_user_id || record.assignedTo) ||
+                 a.name === record.assignee_name ||
+                 a.name === record.employee_name_raw
+        );
+        setAssignedTo(matchedAgent ? (matchedAgent.id || matchedAgent._id) : '');
+      } else {
+        setMode(initialMode);
+        setForm(emptyForm);
+        setAssignedTo('');
+      }
+      setFieldErrors([]);
+    }
+  }, [open, initialMode, record, agents]);
 
   if (!open) return null;
 
@@ -74,15 +111,22 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
     setSaving(true);
     setFieldErrors([]);
     try {
-      const res = await axios.post('/api/v1/delivery-data', {
+      const payload = {
         verticalId: vertical._id,
         ...form,
         employeeName: selectedAgentName,
-      });
+      };
+      let res;
+      if (record) {
+        res = await axios.patch(`/api/v1/delivery-data/${record.id || record._id}`, payload);
+        toast.success('Delivery data record updated.');
+      } else {
+        res = await axios.post('/api/v1/delivery-data', payload);
+        toast.success('Delivery data record saved.');
+      }
       if (res.data.warnings?.length) {
         res.data.warnings.forEach((w) => toast(w.message, { icon: '⚠️' }));
       }
-      toast.success('Delivery data record saved.');
       onSaved?.();
       handleClose();
     } catch (err) {
@@ -120,29 +164,31 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
         <div className="flex items-center justify-between border-b border-[--border] pb-3">
           <h3 className="text-lg font-bold text-[--text-primary] flex items-center gap-2">
             <Truck className="text-[--accent]" size={20} />
-            <span>Add Delivery Data</span>
+            <span>{record ? 'Edit Delivery Data' : 'Add Delivery Data'}</span>
           </h3>
           <button onClick={handleClose} className="p-1 border border-[--border-strong] rounded text-[--text-secondary] hover:bg-stone-50">
             <X size={16} />
           </button>
         </div>
 
-        <div className="flex gap-2 border-b border-[--border] pb-3">
-          <button
-            type="button"
-            onClick={() => setMode('single')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'single' ? 'bg-[--accent] text-white' : 'bg-stone-100 text-[--text-secondary]'}`}
-          >
-            Single Add
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('bulk')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'bulk' ? 'bg-[--accent] text-white' : 'bg-stone-100 text-[--text-secondary]'}`}
-          >
-            Bulk Upload
-          </button>
-        </div>
+        {!record && (
+          <div className="flex gap-2 border-b border-[--border] pb-3">
+            <button
+              type="button"
+              onClick={() => setMode('single')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'single' ? 'bg-[--accent] text-white' : 'bg-stone-100 text-[--text-secondary]'}`}
+            >
+              Single Add
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('bulk')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'bulk' ? 'bg-[--accent] text-white' : 'bg-stone-100 text-[--text-secondary]'}`}
+            >
+              Bulk Upload
+            </button>
+          </div>
+        )}
 
         {fieldErrors.length > 0 && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-600 space-y-1">

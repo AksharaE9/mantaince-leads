@@ -7,6 +7,8 @@ import {
   getRawDataSchema,
   uploadRawDataCsv,
   exportRawDataCsv,
+  updateRawData,
+  deleteRawData,
 } from '../controllers/rawData.js';
 import { getCsvLogs, getCsvLogById, streamFailedRows } from '../controllers/csv.js';
 import authenticate from '../middleware/authenticate.js';
@@ -45,6 +47,8 @@ router.use(attachRole);
 // so no existing role needs a manual grant to use it.
 router.get('/', checkPermission(['leads:read', 'leads:read_own']), getRawData);
 router.post('/', checkPermission('leads:create'), createRawData);
+router.patch('/:id', checkPermission(['leads:update', 'leads:update_own']), updateRawData);
+router.delete('/:id', checkPermission(['leads:delete', 'leads:delete_own']), deleteRawData);
 router.get('/export/csv', checkPermission(['leads:read', 'leads:read_own']), exportRawDataCsv);
 
 router.get('/import-template', checkPermission('csv:template'), downloadRawDataTemplate);

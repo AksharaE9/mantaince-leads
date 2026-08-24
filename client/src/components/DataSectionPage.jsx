@@ -2,11 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Filter, Download, Upload, Plus, ChevronLeft, ChevronRight, ChevronDown,
-  FileSpreadsheet, AlertTriangle, Layers, MessageSquare, Calendar, Clock, Trash2,
+  FileSpreadsheet, AlertTriangle, Layers, MessageSquare, Calendar, Clock, Trash2, Edit,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import axios from '../api/axios.js';
 import { useUiStore } from '../store/uiStore.js';
+import { useAuthStore } from '../store/authStore.js';
 import Loader from './Loader.jsx';
 import VerticalSelectionBar from './VerticalSelectionBar.jsx';
 import SearchableOperatorSelect from './SearchableOperatorSelect.jsx';
@@ -25,7 +26,10 @@ export default function DataSectionPage({ config }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { activeVertical, setActiveVertical, leadsRefreshTrigger } = useUiStore();
+  const { user } = useAuthStore();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'vertical_admin';
 
   const [verticals, setVerticals] = useState([]);
   const [subVerticals, setSubVerticals] = useState([]);
@@ -233,9 +237,34 @@ export default function DataSectionPage({ config }) {
     }
   };
 
-  const openAdd = () => { setModalMode('single'); setModalOpen(true); };
-  const openImport = () => { setModalMode('bulk'); setModalOpen(true); };
+  const [selectedRecord, setSelectedRecord] = useState(null);
+
+  const openAdd = () => { setSelectedRecord(null); setModalMode('single'); setModalOpen(true); };
+  const openImport = () => { setSelectedRecord(null); setModalMode('bulk'); setModalOpen(true); };
   const resetAllFilters = () => setSearchParams({ verticalId: activeVertical?._id || '' });
+
+  const handleOpenEdit = (record) => {
+    setSelectedRecord(record);
+    setModalMode('edit');
+    setModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setSelectedRecord(null);
+    setModalOpen(false);
+    fetchRecords();
+  };
+
+  const handleSingleDelete = async (recordId) => {
+    if (!window.confirm(`Are you sure you want to delete this ${title.toLowerCase()} record?`)) return;
+    try {
+      await axios.delete(`${config.endpoints.list}/${recordId}`);
+      toast.success(`${title} record deleted successfully`);
+      fetchRecords();
+    } catch (err) {
+      toast.error(err.response?.data?.error || `Failed to delete ${title.toLowerCase()} record`);
+    }
+  };
 
   const selectVertical = (v) => {
     setActiveVertical(v);
@@ -464,6 +493,7 @@ export default function DataSectionPage({ config }) {
                       ) : col.label}
                     </th>
                   ))}
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -490,10 +520,30 @@ export default function DataSectionPage({ config }) {
                             {col.render ? col.render(row) : (row[col.key] || '-')}
                           </td>
                         ))}
+                        <td className="px-4 py-3 text-right whitespace-nowrap space-x-1">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(row)}
+                            className="p-1.5 border border-stone-200 rounded hover:bg-stone-50 inline-flex items-center justify-center"
+                            title="Edit"
+                          >
+                            <Edit size={12} className="text-[--text-secondary]" />
+                          </button>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleSingleDelete(rowId)}
+                              className="p-1.5 border border-stone-200 rounded hover:bg-stone-50 text-red-500 inline-flex items-center justify-center"
+                              title="Delete"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                       {expanded && (
                         <tr className="bg-stone-50/50 border-b border-[--border]">
-                          <td colSpan={columns.length + 1} className="px-8 py-5">
+                          <td colSpan={columns.length + 2} className="px-8 py-5">
                             <div className="space-y-5">
                               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 text-xs">
                                 {detailFields.map((f) => (
@@ -537,13 +587,14 @@ export default function DataSectionPage({ config }) {
       {ModalComponent && (
         <ModalComponent
           open={modalOpen}
-          onClose={() => { setModalOpen(false); fetchRecords(); }}
+          onClose={handleCloseModal}
           vertical={activeVertical}
           subVerticals={subVerticals}
           defaultSubVerticalId={subVerticalId}
           agents={agents}
           initialMode={modalMode}
           onSaved={fetchRecords}
+          record={selectedRecord}
         />
       )}
     </div>

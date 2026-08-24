@@ -483,3 +483,127 @@ export const uploadDeliveryDataCsv = async (req, res) => {
         return sendControllerError(res, error, 'uploadDeliveryDataCsv', { section: 'delivery_data', operation: 'bulk_upload' });
     }
 };
+
+export const updateDeliveryData = async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+    try {
+        if (!isValidUUID(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid record ID' });
+        }
+
+        const deliveryDataRes = await query('SELECT * FROM delivery_data WHERE id = $1 AND is_deleted = false', [id]);
+        const record = deliveryDataRes.rows[0];
+        if (!record) {
+            return res.status(404).json({ success: false, error: 'Delivery Data record not found' });
+        }
+
+        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(record.vertical_id))) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+
+        const row = {
+            date: updates.date !== undefined ? updates.date : record.date,
+            employeeName: updates.employeeName !== undefined ? updates.employeeName : record.employee_name_raw,
+            businessType: updates.businessType !== undefined ? updates.businessType : record.business_type,
+            businessName: updates.businessName !== undefined ? updates.businessName : record.business_name,
+            contactPerson: updates.contactPerson !== undefined ? updates.contactPerson : record.contact_person,
+            phoneNumber: updates.phoneNumber !== undefined ? updates.phoneNumber : record.phone_number,
+            alternateNumber: updates.alternateNumber !== undefined ? updates.alternateNumber : record.alternate_number,
+            city: updates.city !== undefined ? updates.city : record.city,
+            area: updates.area !== undefined ? updates.area : record.area,
+            address: updates.address !== undefined ? updates.address : record.address,
+            callStatus: updates.callStatus !== undefined ? updates.callStatus : record.call_status,
+            customerResponse: updates.customerResponse !== undefined ? updates.customerResponse : record.customer_response,
+            followUpRequired: updates.followUpRequired !== undefined ? updates.followUpRequired : record.follow_up_required,
+            followUpDate: updates.followUpDate !== undefined ? updates.followUpDate : record.follow_up_date,
+            followUpTime: updates.followUpTime !== undefined ? updates.followUpTime : record.follow_up_time,
+            nextAction: updates.nextAction !== undefined ? updates.nextAction : record.next_action,
+            remarks: updates.remarks !== undefined ? updates.remarks : record.remarks,
+            converted: updates.converted !== undefined ? updates.converted : record.converted,
+            deliveryDate: updates.deliveryDate !== undefined ? updates.deliveryDate : record.delivery_date,
+            deliveryTime: updates.deliveryTime !== undefined ? updates.delivery_time : record.delivery_time,
+        };
+
+        const [agents, knownBusinessTypes] = await Promise.all([
+            getAssignableAgents(record.vertical_id),
+            getKnownBusinessTypes(record.vertical_id),
+        ]);
+
+        const { errors, warnings, assignedUserId, employeeNameRaw } = validateDeliveryDataRow(row, { agents, knownBusinessTypes });
+        if (errors.length > 0) {
+            return res.status(422).json({
+                success: false,
+                error: errors.map(e => e.message).join('; '),
+                fields: errors
+            });
+        }
+
+        const phone = (row.phoneNumber || '').replace(/[^\d+]/g, '');
+        const linkResult = await findLinkedRawData(record.vertical_id, phone, row.businessName);
+        if (linkResult.warning) warnings.push({ field: 'linkedRawDataId', message: linkResult.warning });
+
+        const followUpDateVal = parseFlexibleDate(row.followUpDate);
+        const dateVal = parseFlexibleDate(row.date);
+        const deliveryDateVal = parseFlexibleDate(row.deliveryDate);
+
+        const updateRes = await query(`
+            UPDATE delivery_data SET
+                assigned_user_id = $2, date = $3, business_type = $4, business_name = $5,
+                contact_person = $6, phone_number = $7, alternate_number = $8,
+                city = $9, area = $10, address = $11,
+                call_status = $12, customer_response = $13, follow_up_required = $14,
+                follow_up_date = $15, follow_up_time = $16, next_action = $17, remarks = $18, converted = $19,
+                delivery_date = $20, delivery_time = $21,
+                appointment_date = $22, appointment_timings = $23,
+                linked_raw_data_id = $24, employee_name_raw = $25, updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+        `, [
+            id, assignedUserId || null, dateVal,
+            row.businessType || null, row.businessName || null,
+            row.contactPerson || null, phone, row.alternateNumber || null,
+            row.city || null, row.area || null, row.address || null,
+            row.callStatus || null, row.customerResponse || null, row.followUpRequired || null,
+            followUpDateVal, row.followUpTime || null, row.nextAction || null, row.remarks || null, row.converted || null,
+            deliveryDateVal, row.deliveryTime || null,
+            followUpDateVal, row.followUpTime || null,
+            linkResult.linkedRawDataId || null, employeeNameRaw || null
+        ]);
+
+        await logAudit(req, { action: 'delivery_data.update', targetCollection: 'delivery_data', targetId: id, before: record, after: updateRes.rows[0] });
+        broadcastToAll({ type: 'DELIVERY_DATA_MUTATED', verticalId: record.vertical_id, action: 'update' });
+
+        return res.status(200).json({ success: true, data: updateRes.rows[0], warnings });
+    } catch (error) {
+        return sendControllerError(res, error, 'updateDeliveryData', { section: 'delivery_data', operation: 'single_update', recordId: id });
+    }
+};
+
+export const deleteDeliveryData = async (req, res) => {
+    const { id } = req.params;
+    try {
+        if (!isValidUUID(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid record ID' });
+        }
+
+        const deliveryDataRes = await query('SELECT * FROM delivery_data WHERE id = $1 AND is_deleted = false', [id]);
+        const record = deliveryDataRes.rows[0];
+        if (!record) {
+            return res.status(404).json({ success: false, error: 'Delivery Data record not found' });
+        }
+
+        if (req.user.role !== 'super_admin' && (!req.user.verticalAccess || !req.user.verticalAccess.includes(record.vertical_id))) {
+            return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
+        }
+
+        const deleteRes = await query('UPDATE delivery_data SET is_deleted = true, updated_at = NOW() WHERE id = $1 RETURNING *', [id]);
+
+        await logAudit(req, { action: 'delivery_data.delete', targetCollection: 'delivery_data', targetId: id, before: record });
+        broadcastToAll({ type: 'DELIVERY_DATA_MUTATED', verticalId: record.vertical_id, action: 'delete' });
+
+        return res.status(200).json({ success: true, data: deleteRes.rows[0] });
+    } catch (error) {
+        return sendControllerError(res, error, 'deleteDeliveryData', { section: 'delivery_data', operation: 'delete', recordId: id });
+    }
+};
