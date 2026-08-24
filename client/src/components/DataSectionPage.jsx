@@ -106,7 +106,7 @@ export default function DataSectionPage({ config }) {
         verticalId: activeVertical._id, page: String(page), limit: String(limit),
         search, sortBy, sortDir,
       });
-      if (subVerticalId) qParams.set('subVerticalId', subVerticalId);
+      if (!config.hideSubVerticals && subVerticalId) qParams.set('subVerticalId', subVerticalId);
       if (dateFrom) qParams.set('dateFrom', dateFrom);
       if (dateTo) qParams.set('dateTo', dateTo);
       if (productService) qParams.set('productService', productService);
@@ -167,7 +167,7 @@ export default function DataSectionPage({ config }) {
     if (!activeVertical) return;
     try {
       const qParams = new URLSearchParams({ verticalId: activeVertical._id, sortBy, sortDir });
-      if (subVerticalId) qParams.set('subVerticalId', subVerticalId);
+      if (!config.hideSubVerticals && subVerticalId) qParams.set('subVerticalId', subVerticalId);
       if (search) qParams.set('search', search);
       if (dateFrom) qParams.set('dateFrom', dateFrom);
       if (dateTo) qParams.set('dateTo', dateTo);
@@ -333,7 +333,7 @@ export default function DataSectionPage({ config }) {
 
       <VerticalSelectionBar verticals={verticals} activeVerticalId={activeVertical._id} onSelect={selectVertical} />
 
-      {subVerticals.length > 0 && (
+      {!config.hideSubVerticals && subVerticals.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
           <button
             type="button"

@@ -1097,6 +1097,7 @@ export const FollowUpsPositivesPage = () => {
           setActiveVertical(v);
           setActiveSubVertical(null);
           setRowSelection({});
+          setSearchInput('');
           setSearchParams({ verticalId: v._id });
         }}
       />

@@ -1048,10 +1048,8 @@ export const LeadsPage = () => {
         onSelect={(v) => {
           setActiveVertical(v);
           setActiveSubVertical(null);
-          const next = new URLSearchParams(searchParams);
-          next.set('verticalId', v._id);
-          next.delete('subVerticalId');
-          navigate(`/leads?${next.toString()}`);
+          setSearchInput('');
+          navigate(`/leads?verticalId=${v._id}`);
         }}
       />
 

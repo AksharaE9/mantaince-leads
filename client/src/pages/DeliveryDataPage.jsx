@@ -128,6 +128,7 @@ const config = {
   filenamePrefix: 'delivery-data',
   ModalComponent: DeliveryDataModal,
   emptyStateText: 'No delivery data yet — add one or import a file.',
+  hideSubVerticals: true,
 };
 
 export default function DeliveryDataPage() {

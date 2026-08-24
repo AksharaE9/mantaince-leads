@@ -328,8 +328,10 @@ const processCsvJob = async (job) => {
             normalizedRows.push({ row, original: rawRow });
 
             const rawPhone = sanitizePhone(
-                row['contact number'] || row['contact'] || row['contact no'] ||
-                row['number'] || row['phone'] || row['mobile'] || ''
+                row['contact number'] || row['phone number'] || row['mobile number'] ||
+                row['contact'] || row['phone'] || row['mobile'] ||
+                row['contact no'] || row['phone no'] || row['mobile no'] ||
+                row['number'] || ''
             );
             if (rawPhone) csvPhones.push(rawPhone);
         }
@@ -370,13 +372,15 @@ const processCsvJob = async (job) => {
             rowNum++;
 
             const rawPhone = sanitizePhone(
-                row['contact number'] || row['contact'] || row['contact no'] ||
-                row['number'] || row['phone'] || row['mobile'] || ''
+                row['contact number'] || row['phone number'] || row['mobile number'] ||
+                row['contact'] || row['phone'] || row['mobile'] ||
+                row['contact no'] || row['phone no'] || row['mobile no'] ||
+                row['number'] || ''
             );
             const rawName =
                 row['business/person/shop/company name'] ||
                 row['business person, shop, and company name'] ||
-                row['name'] || '';
+                row['name'] || row['business'] || row['business name'] || '';
             const rawBusiness =
                 row['business/person/shop/company name'] ||
                 row['business person, shop, and company name'] ||
