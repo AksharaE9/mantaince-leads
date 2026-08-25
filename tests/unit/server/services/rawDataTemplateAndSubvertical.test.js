@@ -40,7 +40,7 @@ describe('Raw Data Template & Sub-Vertical Architecture', () => {
 
         expect(headers).toEqual([
             'Date', 'Employee Name', 'Product/Service', 'Lead Name', 'Contact Person',
-            'Mobile Number', 'Alternate Number(If Any)', 'City', 'Area', 'Map Location',
+            'Contact Number', 'Alternate Number(If Any)', 'City', 'Area', 'Map Location',
             'Call Status', 'Customer Response', 'Follow-up Required', 'Follow-up Date',
             'Follow-up Time', 'Next Action', 'Remarks', 'Converted (Y/N)',
         ]);
@@ -99,7 +99,7 @@ describe('Raw Data Template & Sub-Vertical Architecture', () => {
         expect(resolveRawDataSortColumn('unknownField')).toBe('r.created_at');
     });
 
-    it('enforces Mobile Number as mandatory primary key in row validation', () => {
+    it('enforces Contact Number as mandatory primary key in row validation', () => {
         const withoutPhone = {
             date: '2026-08-08',
             leadName: 'Test Business',
@@ -108,7 +108,7 @@ describe('Raw Data Template & Sub-Vertical Architecture', () => {
         const res = validateRawDataRow(withoutPhone);
         expect(res.errors).toContainEqual({
             field: 'phoneNumber',
-            message: 'Mobile Number is required',
+            message: 'Contact Number is required',
         });
     });
 });

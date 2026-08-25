@@ -65,14 +65,14 @@ describe('buildXlsxTemplate — required-field highlighting is derived from sche
     // Data's real, live schemas — Phone Number. If a future edit to either
     // schema accidentally marks a second field required (or un-marks Phone
     // Number), this fails without needing to download an actual template.
-    it('Raw Data template: only Mobile Number is highlighted required', async () => {
+    it('Raw Data template: only Contact Number is highlighted required', async () => {
         const workbook = await buildXlsxTemplate(RAW_DATA_FIELDS, [], {});
-        expect(highlightedLabels(workbook, RAW_DATA_FIELDS)).toEqual(['Mobile Number']);
+        expect(highlightedLabels(workbook, RAW_DATA_FIELDS)).toEqual(['Contact Number']);
     });
 
-    it('Delivery Data template: only Mobile Number is highlighted required', async () => {
+    it('Delivery Data template: only Contact Number is highlighted required', async () => {
         const workbook = await buildXlsxTemplate(DELIVERY_DATA_FIELDS, [], {});
-        expect(highlightedLabels(workbook, DELIVERY_DATA_FIELDS)).toEqual(['Mobile Number']);
+        expect(highlightedLabels(workbook, DELIVERY_DATA_FIELDS)).toEqual(['Contact Number']);
     });
 
     it('COS template: only Contact Number is highlighted required', async () => {

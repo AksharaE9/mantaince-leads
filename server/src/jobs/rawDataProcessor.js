@@ -209,7 +209,7 @@ const SCHEMA_FIELD_LABELS = {
     productService: 'Product/Service',
     leadName: 'Lead Name',
     contactPerson: 'Contact Person',
-    phoneNumber: 'Mobile Number',   // canonical label as shown in the template
+    phoneNumber: 'Contact Number',   // canonical label as shown in the template
     alternateNumber: 'Alternate Number(If Any)',
     city: 'City',
     area: 'Area',
@@ -496,7 +496,7 @@ export const processRawDataJob = async (job) => {
                 errors.push({
                     row: 0,
                     code: 'COLUMN_EMPTY_ERROR',
-                    reason: `The 'Mobile Number' column was found in Sheet "${sheetName}" but is empty in all ${sheetRows.length} rows. Check that data is in the expected column, or that you selected the correct sheet.`,
+                    reason: `The 'Contact Number' column was found in Sheet "${sheetName}" but is empty in all ${sheetRows.length} rows. Check that data is in the expected column, or that you selected the correct sheet.`,
                     sheetName,
                     warning: false
                 });
@@ -526,7 +526,7 @@ export const processRawDataJob = async (job) => {
                     duplicateCount++;
                     stats.duplicates++;
                     const conflict = conflictLabelByPhone.get(phone) || (row.leadName || row.businessName || 'prior row in file');
-                    const reason = `Duplicate: mobile number already exists (conflicts with "${conflict}")`;
+                    const reason = `Duplicate: contact number already exists (conflicts with "${conflict}")`;
                     errors.push({ row: rowNum, code: ErrorCodes.DUPLICATE_PHONE, field: 'phoneNumber', reason, originalRow: rawRow, sheetName });
                     rowOutcomes.push({ row: rowNum, status: 'duplicate', reason, sheetName });
                     return;
@@ -605,7 +605,7 @@ export const processRawDataJob = async (job) => {
                     } catch (singleErr) {
                         const rawErr = singleErr.cause || singleErr;
                         const isDup = rawErr.code === '23505';
-                        const reason = isDup ? 'Duplicate: mobile number already exists' : rawErr.message;
+                        const reason = isDup ? 'Duplicate: contact number already exists' : rawErr.message;
                         if (isDup) {
                             duplicateCount++;
                             if (sheetStats.has(r._sheetName)) {

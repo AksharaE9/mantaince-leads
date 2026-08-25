@@ -22,7 +22,7 @@ describe('RAW_DATA_FIELDS', () => {
         const alt = RAW_DATA_FIELDS.find(f => f.key === 'alternateNumber');
         const prod = RAW_DATA_FIELDS.find(f => f.key === 'productService');
         const conv = RAW_DATA_FIELDS.find(f => f.key === 'converted');
-        expect(phone.label).toBe('Mobile Number');
+        expect(phone.label).toBe('Contact Number');
         expect(alt.label).toBe('Alternate Number(If Any)');
         expect(prod.label).toBe('Product/Service');
         expect(conv.label).toBe('Converted (Y/N)');
@@ -32,7 +32,7 @@ describe('RAW_DATA_FIELDS', () => {
         expect(RAW_DATA_FIELDS.some(f => /vertical/i.test(f.key) || /vertical/i.test(f.label))).toBe(false);
     });
 
-    it('marks only phoneNumber (Mobile Number) as required — every other field is optional', () => {
+    it('marks only phoneNumber (Contact Number) as required — every other field is optional', () => {
         const required = RAW_DATA_FIELDS.filter(f => f.required).map(f => f.key);
         expect(required).toEqual(['phoneNumber']);
     });
@@ -112,7 +112,7 @@ describe('validateRawDataRow', () => {
         expect(assignedUserId).toBe('u3');
     });
 
-    it('requires only Mobile Number — blank Date and Lead Name are accepted with no error', () => {
+    it('requires only Contact Number — blank Date and Lead Name are accepted with no error', () => {
         const { errors } = validateRawDataRow({ ...baseRow, date: '', leadName: '', phoneNumber: '' }, ctx);
         const fields = errors.map(e => e.field);
         expect(fields).toEqual(['phoneNumber']);
@@ -127,7 +127,7 @@ describe('validateRawDataRow', () => {
 
     it('rejects an invalid phone number', () => {
         const { errors } = validateRawDataRow({ ...baseRow, phoneNumber: 'not-a-phone' }, ctx);
-        expect(errors).toContainEqual({ field: 'phoneNumber', message: 'Mobile Number is not a valid phone number' });
+        expect(errors).toContainEqual({ field: 'phoneNumber', message: 'Contact Number is not a valid phone number' });
     });
 
     it('warns (does not reject) on an unparseable date', () => {

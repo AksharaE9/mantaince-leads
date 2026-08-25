@@ -199,7 +199,7 @@ const SCHEMA_FIELD_LABELS = {
     businessName: 'Business Name',
     area: 'Area',
     city: 'City',
-    phoneNumber: 'Mobile Number',   // canonical label as shown in the template
+    phoneNumber: 'Contact Number',   // canonical label as shown in the template
     address: 'Address',
     appointmentDate: 'Appointment Date',
     appointmentTimings: 'Appointment Timings',
@@ -533,7 +533,7 @@ export const processDeliveryDataJob = async (job) => {
                 errors.push({
                     row: 0,
                     code: 'COLUMN_EMPTY_ERROR',
-                    reason: `The 'Mobile Number' column was found in Sheet "${sheetName}" but is empty in all ${sheetRows.length} rows. Check that data is in the expected column, or that you selected the correct sheet.`,
+                    reason: `The 'Contact Number' column was found in Sheet "${sheetName}" but is empty in all ${sheetRows.length} rows. Check that data is in the expected column, or that you selected the correct sheet.`,
                     sheetName,
                     warning: false
                 });

@@ -216,25 +216,25 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
               </datalist>
             </FormField>
             <FormField label="Business Name">
-              <input type="text" placeholder="-" className="w-full" value={form.businessName} onChange={set('businessName')} />
+              <input type="text" placeholder="e.g. Acme Enterprises" className="w-full" value={form.businessName} onChange={set('businessName')} />
             </FormField>
             <FormField label="Contact Person">
-              <input type="text" placeholder="-" className="w-full" value={form.contactPerson} onChange={set('contactPerson')} />
+              <input type="text" placeholder="e.g. John Doe" className="w-full" value={form.contactPerson} onChange={set('contactPerson')} />
             </FormField>
-            <FormField label="Mobile Number" required>
+            <FormField label="Contact Number" required>
               <input type="text" required className="w-full" value={form.phoneNumber} onChange={set('phoneNumber')} />
             </FormField>
             <FormField label="Alternate Number">
-              <input type="text" placeholder="-" className="w-full" value={form.alternateNumber} onChange={set('alternateNumber')} />
+              <input type="text" placeholder="Alternate phone" className="w-full" value={form.alternateNumber} onChange={set('alternateNumber')} />
             </FormField>
             <FormField label="City">
-              <input type="text" placeholder="-" className="w-full" value={form.city} onChange={set('city')} />
+              <input type="text" placeholder="e.g. Bengaluru" className="w-full" value={form.city} onChange={set('city')} />
             </FormField>
             <FormField label="Area">
-              <input type="text" placeholder="-" className="w-full" value={form.area} onChange={set('area')} />
+              <input type="text" placeholder="e.g. Whitefield" className="w-full" value={form.area} onChange={set('area')} />
             </FormField>
             <FormField label="Address / Map Location">
-              <input type="text" placeholder="-" className="w-full" value={form.address} onChange={set('address')} />
+              <input type="text" placeholder="e.g. Whitefield, Bengaluru" className="w-full" value={form.address} onChange={set('address')} />
             </FormField>
             <FormField label="Call Status">
               <select className="w-full" value={form.callStatus} onChange={set('callStatus')}>
@@ -268,7 +268,7 @@ export default function DeliveryDataModal({ open, onClose, vertical, agents = []
               <input type="text" placeholder="e.g. 10:00 AM - 11:00 AM" className="w-full" value={form.appointmentTimings} onChange={set('appointmentTimings')} />
             </FormField>
             <FormField label="Next Action">
-              <input type="text" placeholder="-" className="w-full" value={form.nextAction} onChange={set('nextAction')} />
+              <input type="text" placeholder="e.g. Send brochure / Demo" className="w-full" value={form.nextAction} onChange={set('nextAction')} />
             </FormField>
             <FormField label="Converted (Y/N)">
               <select className="w-full" value={form.converted} onChange={set('converted')}>

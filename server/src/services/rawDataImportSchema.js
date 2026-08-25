@@ -30,8 +30,8 @@ export const RAW_DATA_FIELDS = [
     // IMPORTANT: csvHeader must be 'Mobile Number' \u2014 this is what the template generates and what
     // real user files contain. The processor alias maps also accept 'Phone Number', 'Contact Number',
     // 'Mobile', 'Phone', 'Contact', 'CONTACT NUMBER' (COS template), etc.
-    { key: 'phoneNumber', label: 'Mobile Number', csvHeader: 'Mobile Number', type: 'phone', required: true, unique: true,
-        aliases: ['Mobile Number', 'Phone Number', 'Contact Number', 'CONTACT NUMBER', 'Mobile', 'Phone', 'Contact', 'Mobile No', 'Phone No'] },
+    { key: 'phoneNumber', label: 'Contact Number', csvHeader: 'Contact Number', type: 'phone', required: true, unique: true,
+        aliases: ['Contact Number', 'Mobile Number', 'CONTACT NUMBER', 'MOBILE NUMBER', 'PHONE NO', 'Phone Number', 'Mobile No', 'Mobile', 'Phone', 'Contact No', 'Contact'] },
     { key: 'alternateNumber', label: 'Alternate Number(If Any)', csvHeader: 'Alternate Number(If Any)', type: 'string', required: false,
         aliases: ['Alternate Number(If Any)', 'Alternate Number (If Any)', 'Alternate Number', 'Alt Number'] },
     { key: 'city', label: 'City', csvHeader: 'City', type: 'string', required: false,

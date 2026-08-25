@@ -251,7 +251,7 @@ export default function RawDataModal({
               <input type="text" placeholder="e.g. John Doe" className="w-full" value={form.contactPerson} onChange={set('contactPerson')} />
             </FormField>
 
-            <FormField label="Mobile Number" required>
+            <FormField label="Contact Number" required>
               <input type="text" required placeholder="Mandatory (Primary Key)" className="w-full font-medium" value={form.phoneNumber} onChange={set('phoneNumber')} />
             </FormField>
 

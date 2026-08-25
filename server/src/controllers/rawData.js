@@ -285,7 +285,7 @@ export const createRawData = async (req, res) => {
             const conflictName = dupRes.rows[0].lead_name || dupRes.rows[0].business_name || dupRes.rows[0].contact_person || 'existing record';
             return operationError(res, {
                 status: 409, code: ErrorCodes.DUPLICATE_PHONE,
-                message: `Mobile number ${phone} already exists in Raw Data for this section (conflicts with "${conflictName}")`,
+                message: `Contact number ${phone} already exists in Raw Data for this section (conflicts with "${conflictName}")`,
                 section: 'raw_data', operation: 'single_add', field: 'phoneNumber', recordId: dupRes.rows[0].id,
             });
         }
@@ -589,7 +589,7 @@ export const updateRawData = async (req, res) => {
             const conflictName = dupRes.rows[0].lead_name || dupRes.rows[0].business_name || dupRes.rows[0].contact_person || 'existing record';
             return res.status(409).json({
                 success: false,
-                error: `Mobile number ${phone} already exists in Raw Data for this section (conflicts with "${conflictName}")`
+                error: `Contact number ${phone} already exists in Raw Data for this section (conflicts with "${conflictName}")`
             });
         }
 
