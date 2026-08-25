@@ -77,10 +77,10 @@ export default function CsvImportModal({
 
   // Client-side pre-validation preview — fast feedback only, never trusted.
   useEffect(() => {
-    if (!selectedFile || !vertical?._id) {
-      setFilePreview(null);
-      setSheetsList([]);
-      setSelectedSheetIndices([0]);
+    if (!open || !selectedFile || !vertical?._id) {
+      setFilePreview(prev => prev === null ? prev : null);
+      setSheetsList(prev => prev.length === 0 ? prev : []);
+      setSelectedSheetIndices(prev => (prev.length === 1 && prev[0] === 0) ? prev : [0]);
       return undefined;
     }
     let cancelled = false;
@@ -116,8 +116,8 @@ export default function CsvImportModal({
           }
         } else {
           if (!cancelled) {
-            setSheetsList([]);
-            setSelectedSheetIndices([0]);
+            setSheetsList(prev => prev.length === 0 ? prev : []);
+            setSelectedSheetIndices(prev => (prev.length === 1 && prev[0] === 0) ? prev : [0]);
           }
         }
 
@@ -154,7 +154,7 @@ export default function CsvImportModal({
     })();
 
     return () => { cancelled = true; };
-  }, [selectedFile, currentLeadType, vertical?._id, selectedSheetIndices]);
+  }, [open, selectedFile, currentLeadType, vertical?._id, selectedSheetIndices[0]]);
 
   if (!open) return null;
 
