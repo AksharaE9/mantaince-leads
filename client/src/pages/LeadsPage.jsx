@@ -1435,7 +1435,6 @@ export const LeadsPage = () => {
                       onChange={(event) => handleDynamicChange('remarks', event.target.value)}
                     />
                   </FormField>
-                </FormSection>
 
                   {leadFormLeadType === 'FIELD' && (
                     <div className="col-span-1 md:col-span-2 xl:col-span-3">
