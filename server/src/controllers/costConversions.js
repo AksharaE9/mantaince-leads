@@ -18,6 +18,7 @@ import { broadcastToAll } from '../services/assignmentBroadcaster.js';
 import { z } from 'zod';
 import { bulkInsert } from '../db/bulkInsert.js';
 import { sendControllerError } from '../utils/dbErrors.js';
+import { getLeadImportSchema } from '../services/leadImportSchema.js';
 import { operationError, ErrorCodes } from '../utils/operationError.js';
 
 // ── CSV escape helper (module-level, reused by export) ────────────────────────
@@ -864,34 +865,23 @@ export const assignCostConversion = async (req, res) => {
  * Serialize one lead row to a CSV line for the given leadType.
  * Extracted to avoid code duplication between POSITIVE and CALL branches.
  */
-function serializeLeadCsvRow(l, isPositive) {
+function serializeLeadCsvRow(l, schema) {
     const d = l.data || {};
-    const dateVal = d.date || (l.created_at ? l.created_at.toISOString().split('T')[0] : '');
-    const empName = l.assignee_name || d.employeeName || '';
-    const bType   = d.businessType || '';
-    const name    = l.name || l.business_name || d.businessName || '';
-
-    if (isPositive) {
-        return [
-            dateVal, empName, bType, name,
-            d.area || '', d.city || '',
-            l.phone || d.phone || '',
-            d.pointOfContact || '', d.remarks || '', d.recordings || '',
-            d.followUpRequired || '', d.followUps || '',
-            d.followUpDates || '', d.followUpRemarks || '',
-            d.requirement || '', d.notes || '', l.status || '',
-        ].map(v => `"${escapeCsvVal(v)}"`).join(',');
-    } else {
-        return [
-            dateVal, empName, bType, name,
-            l.phone || d.phone || '',
-            d.pointOfContact || '', d.area || '', d.city || '',
-            d.deliveredLocation || '', d.remarks || '', d.recordings || '',
-            d.appointmentType || '', d.appointmentDate || '',
-            d.appointmentTime || '', d.requirement || '', d.notes || '',
-            l.status || '',
-        ].map(v => `"${escapeCsvVal(v)}"`).join(',');
-    }
+    return schema.map(f => {
+        let val = '';
+        if (f.key === 'phone') {
+            val = l.phone || d.phone || '';
+        } else if (f.key === 'businessName') {
+            val = l.business_name || l.name || d.businessName || '';
+        } else if (f.key === 'employeeName') {
+            val = l.assignee_name || d.employeeName || '';
+        } else if (f.key === 'date') {
+            val = d.date || (l.created_at ? l.created_at.toISOString().split('T')[0] : '');
+        } else {
+            val = d[f.key] ?? '';
+        }
+        return `"${escapeCsvVal(val)}"`;
+    }).join(',') + `,"${escapeCsvVal(l.status || '')}"`;
 }
 
 /**
@@ -911,42 +901,39 @@ export const exportCostConversionsCsv = async (req, res) => {
         return res.status(403).json({ success: false, error: 'Access forbidden: you do not have access to this business vertical' });
     }
 
-    const isPositive = leadType === 'POSITIVE';
-
-    const csvHeader = isPositive
-        ? 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,AREA,CITY,CONTACT NUMBER,POINT OF CONTACT,REMARKS,RECORDINGS,FOLLOW-UP REQUIRED,FOLLOW-UPS,FOLLOW-UP DATES,FOLLOW-UP REMARKS,REQUIREMENT IF ANY,A NOTES TO THE COS TEAM ONLY,Status\n'
-        : 'DATE,EMPLOYEE NAME,BUSINESS TYPE,BUSINESS / PERSON / SHOP / COMPANY NAME,CONTACT NUMBER,POINT OF CONTACT,AREA,CITY,LINK ADDRESS,REMARKS,RECORDINGS,APPOINTMENT TYPE (YES OR NO),APPOINTMENT DATE,APPOINTMENT TIME,REQUIREMENT ORDER IF ANY,NOTES TO THE COS IF ANY,Status\n';
-
-    // Build query — same projection as before, cursor-friendly
-    const params = [verticalId];
-    const wheres = ['l.vertical_id = $1', 'l.is_deleted = false', "(l.duplicate_status IS NULL OR l.duplicate_status NOT IN ('duplicate_removed', 'promoted_removed'))"];
-    const filters = buildCostConversionsFilters(req.query, 2);
-    wheres.push(...filters.wheres);
-    params.push(...filters.params);
-
-    const sortCol = ['createdAt', 'updatedAt', 'businessName', 'name', 'status'].includes(req.query.sortBy) ? SORT_COLUMN_MAP[req.query.sortBy] : 'l.created_at';
-    const dir = req.query.sortDir === 'asc' ? 'ASC' : 'DESC';
-
-    let sql = `
-        SELECT
-            l.name, l.phone, l.business_name,
-            l.status, l.created_at, l.data,
-            u.name  AS assignee_name
-        FROM cost_conversions l
-        LEFT JOIN users u ON u.id = l.assigned_to
-        WHERE ${wheres.join(' AND ')}
-        ORDER BY ${sortCol} ${dir}
-    `;
-
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename=cost-conversions-export-${Date.now()}.csv`);
-    // Disable compression for streaming responses
-    res.setHeader('X-No-Compression', '1');
-
     try {
+        const schema = await getLeadImportSchema(verticalId, leadType);
+        const csvHeader = schema.map(f => f.label || f.csvHeader).join(',') + ',Status\n';
+
+        // Build query — same projection as before, cursor-friendly
+        const params = [verticalId];
+        const wheres = ['l.vertical_id = $1', 'l.is_deleted = false', "(l.duplicate_status IS NULL OR l.duplicate_status NOT IN ('duplicate_removed', 'promoted_removed'))"];
+        const filters = buildCostConversionsFilters(req.query, 2);
+        wheres.push(...filters.wheres);
+        params.push(...filters.params);
+
+        const sortCol = ['createdAt', 'updatedAt', 'businessName', 'name', 'status'].includes(req.query.sortBy) ? SORT_COLUMN_MAP[req.query.sortBy] : 'l.created_at';
+        const dir = req.query.sortDir === 'asc' ? 'ASC' : 'DESC';
+
+        let sql = `
+            SELECT
+                l.name, l.phone, l.business_name,
+                l.status, l.created_at, l.data,
+                u.name  AS assignee_name
+            FROM cost_conversions l
+            LEFT JOIN users u ON u.id = l.assigned_to
+            WHERE ${wheres.join(' AND ')}
+            ORDER BY ${sortCol} ${dir}
+        `;
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=cost-conversions-export-${Date.now()}.csv`);
+        // Disable compression for streaming responses
+        res.setHeader('X-No-Compression', '1');
+
         const rowsRes = await query(sql, params);
         res.write(csvHeader);
-        const lines = rowsRes.rows.map(l => serializeLeadCsvRow(l, isPositive));
+        const lines = rowsRes.rows.map(l => serializeLeadCsvRow(l, schema));
         if (lines.length > 0) {
             res.write(lines.join('\n') + '\n');
         }

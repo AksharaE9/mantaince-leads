@@ -104,11 +104,11 @@ export const FOLLOWUP_ONLY_FIELDS = [
  */
 export function hasFollowupData(row) {
     return !!(
-        (row['follow-up date'] || row['followup date'] || row['follow up date']) ||
-        (row['follow-up time'] || row['followup time'] || row['follow up time']) ||
-        (row['follow-up remarks'] || row['followup remarks'] || row['follow up remarks']) ||
-        (row['follow-up outcome'] || row['followup outcome'] || row['follow up outcome']) ||
-        (row['next follow-up date'] || row['next followup date'] || row['next follow up date'])
+        (row['follow-up date'] || row['followup date'] || row['follow up date'] || row['followupDate']) ||
+        (row['follow-up time'] || row['followup time'] || row['follow up time'] || row['followupTime']) ||
+        (row['follow-up remarks'] || row['followup remarks'] || row['follow up remarks'] || row['followupRemarks']) ||
+        (row['follow-up outcome'] || row['followup outcome'] || row['follow up outcome'] || row['followupOutcome']) ||
+        (row['next follow-up date'] || row['next followup date'] || row['next follow up date'] || row['nextFollowupDate'])
     );
 }
 
@@ -118,15 +118,15 @@ export function hasFollowupData(row) {
  */
 export function extractFollowupFields(row) {
     const interactionDate =
-        row['follow-up date'] || row['followup date'] || row['follow up date'] || '';
+        row['follow-up date'] || row['followup date'] || row['follow up date'] || row['followupDate'] || '';
     const interactionTime =
-        row['follow-up time'] || row['followup time'] || row['follow up time'] || '';
+        row['follow-up time'] || row['followup time'] || row['follow up time'] || row['followupTime'] || '';
     const remarks =
-        row['follow-up remarks'] || row['followup remarks'] || row['follow up remarks'] || '';
+        row['follow-up remarks'] || row['followup remarks'] || row['follow up remarks'] || row['followupRemarks'] || '';
     const outcome =
-        row['follow-up outcome'] || row['followup outcome'] || row['follow up outcome'] || '';
+        row['follow-up outcome'] || row['followup outcome'] || row['follow up outcome'] || row['followupOutcome'] || '';
     const nextFollowupDate =
-        row['next follow-up date'] || row['next followup date'] || row['next follow up date'] || '';
+        row['next follow-up date'] || row['next followup date'] || row['next follow up date'] || row['nextFollowupDate'] || '';
 
     if (!interactionDate && !interactionTime && !remarks && !outcome && !nextFollowupDate) {
         return null; // no follow-up data on this row

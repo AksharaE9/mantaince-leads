@@ -42,15 +42,24 @@ import { extractErrorMessage } from '../utils/errorMessage.js';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
-  { key: 'businessType', label: 'Business Type', type: 'text', defaultValue: '' },
+  { key: 'productService', label: 'Product/Service', type: 'text', defaultValue: '' },
+  { key: 'contactPerson', label: 'Contact Person', type: 'text', defaultValue: '' },
+  { key: 'alternateNumber', label: 'Alternate Number(If Any)', type: 'text', defaultValue: '' },
   { key: 'area', label: 'Area', type: 'text', defaultValue: '' },
   { key: 'city', label: 'City', type: 'text', defaultValue: '' },
-  { key: 'deliveredLocation', label: 'Map Location Link / Address', type: 'text', defaultValue: '' },
-  { key: 'requirement', label: 'Requirement', type: 'text', defaultValue: '' },
+  { key: 'deliveredLocation', label: 'Map Location', type: 'text', defaultValue: '' },
+  { key: 'callStatus', label: 'Call Status', type: 'text', defaultValue: '' },
+  { key: 'customerResponse', label: 'Customer Response', type: 'text', defaultValue: '' },
+  { key: 'followUpRequired', label: 'Follow-up Required', type: 'select', defaultValue: '', options: ['Yes', 'No'] },
+  { key: 'followUpDate', label: 'Follow-up Date', type: 'date', defaultValue: '' },
+  { key: 'followUpTime', label: 'Follow-up Time', type: 'text', defaultValue: '' },
+  { key: 'nextAction', label: 'Next Action', type: 'text', defaultValue: '' },
   { key: 'remarks', label: 'Remarks', type: 'text', defaultValue: '' },
-  { key: 'followUpRequired', label: 'Follow Up Require (Yes/No)', type: 'select', defaultValue: '', options: ['Yes', 'No'] },
-  { key: 'followUpDate', label: 'Follow Up Date', type: 'date', defaultValue: '' },
-  { key: 'followUpRemarks', label: 'Follow Up Remarks', type: 'text', defaultValue: '' },
+  { key: 'positive', label: 'Positive (Y/N)', type: 'select', defaultValue: '', options: ['Yes', 'No', 'Y', 'N'] },
+  { key: 'converted', label: 'Converted (Y/N)', type: 'select', defaultValue: '', options: ['Yes', 'No', 'Y', 'N'] },
+  { key: 'appointmentDate', label: 'Appointment Date', type: 'date', defaultValue: '' },
+  { key: 'appointmentTime', label: 'Appointment Time', type: 'text', defaultValue: '' },
+  { key: 'followupRemarks', label: 'Follow up Remarks', type: 'text', defaultValue: '' },
 ];
 
 const BASE_DYNAMIC_FIELD_KEYS = new Set([
@@ -1521,7 +1530,7 @@ export const FollowUpsPositivesPage = () => {
 
             <form onSubmit={handleLeadSubmit} className="flex flex-col flex-1 overflow-hidden min-h-0">
               <div className="flex-1 overflow-y-auto pr-3 space-y-4 py-1">
-                {/* Row 1: Date only */}
+                {/* Row 1: Date + Product/Service */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] font-black uppercase text-[--text-secondary]">Date</span>
@@ -1532,61 +1541,48 @@ export const FollowUpsPositivesPage = () => {
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
                     />
                   </div>
-                </div>
-
-                {/* Row 2: Business Type + Business/Person/Shop/Company Name */}
-                <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Business Type</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Product/Service</span>
                     <input
                       type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'businessType')}
-                      onChange={(e) => handleDynamicChange('businessType', e.target.value)}
+                      value={getLeadData({ data: leadFormDynamic }, 'productService')}
+                      onChange={(e) => handleDynamicChange('productService', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="e.g. Retail, Wholesale"
+                      placeholder="e.g. Products/Services"
                     />
                   </div>
+                </div>
+
+                {/* Row 2: Lead Name + Contact Person */}
+                <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">BUSINESS / PERSON / SHOP / COMPANY NAME</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Lead Name *</span>
                     <input
                       type="text"
+                      required
                       value={leadFormName}
                       onChange={(e) => {
                         setLeadFormName(e.target.value);
                         setLeadFormBusiness(e.target.value);
                       }}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Enter name/business"
+                      placeholder="Enter lead/business name"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Contact Person</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'contactPerson')}
+                      onChange={(e) => handleDynamicChange('contactPerson', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Enter contact person"
                     />
                   </div>
                 </div>
 
-                {/* Row 3: Area + City */}
+                {/* Row 3: Contact Number + Alternate Number */}
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Area</span>
-                    <input
-                      type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'area')}
-                      onChange={(e) => handleDynamicChange('area', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Area / Locality"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">City</span>
-                    <input
-                      type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'city')}
-                      onChange={(e) => handleDynamicChange('city', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="City"
-                    />
-                  </div>
-                </div>
-
-                {/* Row 4: Contact Number */}
-                <div className="grid grid-cols-1">
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] font-black uppercase text-[--text-secondary]">Contact Number *</span>
                     <input
@@ -1598,25 +1594,127 @@ export const FollowUpsPositivesPage = () => {
                       placeholder="Enter contact number"
                     />
                   </div>
-                </div>
-
-                {/* Row 5: Point of Contact Name + Point of Contact Number */}
-                {/* Row 5: Point of Contact */}
-                <div className="grid grid-cols-1">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Point of Contact</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Alternate Number(If Any)</span>
                     <input
                       type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'pointOfContact')}
-                      onChange={(e) => handleDynamicChange('pointOfContact', e.target.value)}
+                      value={getLeadData({ data: leadFormDynamic }, 'alternateNumber')}
+                      onChange={(e) => handleDynamicChange('alternateNumber', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Enter point of contact"
+                      placeholder="Alternate number"
                     />
                   </div>
                 </div>
 
-                {/* Row 6: Remarks + Recordings */}
+                {/* Row 4: City + Area */}
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">City</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'city')}
+                      onChange={(e) => handleDynamicChange('city', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="City"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Area</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'area')}
+                      onChange={(e) => handleDynamicChange('area', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Area"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 5: Map Location + Call Status */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Map Location</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'deliveredLocation')}
+                      onChange={(e) => handleDynamicChange('deliveredLocation', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Map location link"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Call Status</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'callStatus')}
+                      onChange={(e) => handleDynamicChange('callStatus', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Call status"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 6: Customer Response + Follow-up Required */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Customer Response</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'customerResponse')}
+                      onChange={(e) => handleDynamicChange('customerResponse', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Customer response"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-up Required</span>
+                    <select
+                      value={getLeadData({ data: leadFormDynamic }, 'followUpRequired')}
+                      onChange={(e) => handleDynamicChange('followUpRequired', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                    >
+                      <option value="">-- Select --</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Row 7: Follow-up Date + Follow-up Time */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-up Date</span>
+                    <input
+                      type="date"
+                      value={getLeadData({ data: leadFormDynamic }, 'followUpDate')}
+                      onChange={(e) => handleDynamicChange('followUpDate', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-up Time</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'followUpTime')}
+                      onChange={(e) => handleDynamicChange('followUpTime', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Follow-up time"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 8: Next Action + Remarks */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Next Action</span>
+                    <input
+                      type="text"
+                      value={getLeadData({ data: leadFormDynamic }, 'nextAction')}
+                      onChange={(e) => handleDynamicChange('nextAction', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                      placeholder="Next action details"
+                    />
+                  </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] font-black uppercase text-[--text-secondary]">Remarks</span>
                     <input
@@ -1624,89 +1722,76 @@ export const FollowUpsPositivesPage = () => {
                       value={getLeadData({ data: leadFormDynamic }, 'remarks')}
                       onChange={(e) => handleDynamicChange('remarks', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="General remarks"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Recordings</span>
-                    <input
-                      type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'recordings')}
-                      onChange={(e) => handleDynamicChange('recordings', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Recordings link if any"
+                      placeholder="Remarks"
                     />
                   </div>
                 </div>
 
-                {/* Row 7: Follow-up required + Follow-ups */}
+                {/* Row 9: Positive (Y/N) + Converted (Y/N) */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-up required</span>
-                    <input
-                      type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'followUpRequired')}
-                      onChange={(e) => handleDynamicChange('followUpRequired', e.target.value)}
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Positive (Y/N)</span>
+                    <select
+                      value={getLeadData({ data: leadFormDynamic }, 'positive')}
+                      onChange={(e) => handleDynamicChange('positive', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="e.g. Yes/No"
+                    >
+                      <option value="">-- Select --</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                      <option value="Y">Y</option>
+                      <option value="N">N</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Converted (Y/N)</span>
+                    <select
+                      value={getLeadData({ data: leadFormDynamic }, 'converted')}
+                      onChange={(e) => handleDynamicChange('converted', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
+                    >
+                      <option value="">-- Select --</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                      <option value="Y">Y</option>
+                      <option value="N">N</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Row 10: Appointment Date + Appointment Time */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Appointment Date</span>
+                    <input
+                      type="date"
+                      value={getLeadData({ data: leadFormDynamic }, 'appointmentDate')}
+                      onChange={(e) => handleDynamicChange('appointmentDate', e.target.value)}
+                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-ups</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Appointment Time</span>
                     <input
                       type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'followUps')}
-                      onChange={(e) => handleDynamicChange('followUps', e.target.value)}
+                      value={getLeadData({ data: leadFormDynamic }, 'appointmentTime')}
+                      onChange={(e) => handleDynamicChange('appointmentTime', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Follow-ups notes"
+                      placeholder="Appointment time"
                     />
                   </div>
                 </div>
 
-                {/* Row 8: Follow-up dates + Follow-up remarks */}
-                <div className="grid grid-cols-2 gap-4">
+                {/* Row 11: Follow up Remarks */}
+                <div className="grid grid-cols-1">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-up dates</span>
+                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow up Remarks</span>
                     <input
                       type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'followUpDates')}
-                      onChange={(e) => handleDynamicChange('followUpDates', e.target.value)}
+                      value={getLeadData({ data: leadFormDynamic }, 'followupRemarks')}
+                      onChange={(e) => handleDynamicChange('followupRemarks', e.target.value)}
                       className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Target follow-up dates"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Follow-up remarks</span>
-                    <input
-                      type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'followUpRemarks')}
-                      onChange={(e) => handleDynamicChange('followUpRemarks', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Follow-up remarks"
-                    />
-                  </div>
-                </div>
-
-                {/* Row 9: Requirement if any + A notes to the cos team only */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">Requirement if any</span>
-                    <input
-                      type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'requirement')}
-                      onChange={(e) => handleDynamicChange('requirement', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Requirement details"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase text-[--text-secondary]">A notes to the cos team only</span>
-                    <input
-                      type="text"
-                      value={getLeadData({ data: leadFormDynamic }, 'notes')}
-                      onChange={(e) => handleDynamicChange('notes', e.target.value)}
-                      className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[--accent]"
-                      placeholder="Notes to the cos team"
+                      placeholder="Follow up remarks details"
                     />
                   </div>
                 </div>

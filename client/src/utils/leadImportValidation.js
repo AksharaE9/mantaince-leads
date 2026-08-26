@@ -98,3 +98,57 @@ export function validateParsedRowsAgainstSchema(rows, schema) {
     schemaFields: schema,
   };
 }
+
+export function validateParsedRowsWithMapping(rows, schema, columnMapping) {
+  let validCount = 0;
+  const rowErrors = [];
+
+  const previewMappedRows = rows.slice(0, 5).map((row) => {
+    const mapped = {};
+    schema.forEach((field) => {
+      const fileHeader = columnMapping[field.key];
+      const lookupKey = fileHeader ? normalizeHeaderKey(fileHeader) : '';
+      const val = lookupKey ? row[lookupKey] : '';
+      mapped[field.key] = val === undefined || val === null ? '' : String(val).trim();
+    });
+    return mapped;
+  });
+
+  rows.forEach((row, idx) => {
+    const errors = [];
+    schema.forEach((field) => {
+      const fileHeader = columnMapping[field.key];
+      const lookupKey = fileHeader ? normalizeHeaderKey(fileHeader) : '';
+      const raw = lookupKey ? row[lookupKey] : '';
+      const value = raw === undefined || raw === null ? '' : String(raw).trim();
+
+      if (field.required && !value) {
+        errors.push({ field: field.key, message: `${field.label} is required` });
+        return;
+      }
+      if (!value) return;
+
+      if (field.type === 'phone' && !IMPORT_PHONE_REGEX.test(value.replace(/[^\d+]/g, ''))) {
+        errors.push({ field: field.key, message: `${field.label} is not a valid phone number` });
+      }
+      if (field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+        errors.push({ field: field.key, message: `${field.label} is not a valid email address` });
+      }
+    });
+
+    if (errors.length === 0) {
+      validCount += 1;
+    } else {
+      rowErrors.push({ row: idx + 2, errors });
+    }
+  });
+
+  return {
+    totalRows: rows.length,
+    validCount,
+    invalidCount: rowErrors.length,
+    rowErrors,
+    previewMappedRows,
+    schemaFields: schema,
+  };
+}

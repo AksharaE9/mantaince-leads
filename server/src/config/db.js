@@ -144,6 +144,9 @@ const checkSchemaReady = async () => {
                 SELECT 1 FROM information_schema.columns 
                 WHERE table_name = 'csv_upload_logs' AND column_name = 'lead_type'
             ) AND EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'csv_upload_logs' AND column_name = 'column_mapping'
+            ) AND EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'users' AND column_name = 'is_approved'
             ) AND EXISTS (
@@ -569,6 +572,7 @@ const runMigrations = async () => {
         ALTER TABLE csv_upload_logs ALTER COLUMN file_name DROP NOT NULL;
         ALTER TABLE csv_upload_logs ADD COLUMN IF NOT EXISTS lead_type VARCHAR(50) NOT NULL DEFAULT 'CALL';
         ALTER TABLE csv_upload_logs ADD COLUMN IF NOT EXISTS sheet_indices JSONB;
+        ALTER TABLE csv_upload_logs ADD COLUMN IF NOT EXISTS column_mapping JSONB;
 
 
 

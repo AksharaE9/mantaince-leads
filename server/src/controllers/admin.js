@@ -2,6 +2,8 @@ import { query } from '../config/db.js';
 import crypto from 'crypto';
 import { logAudit } from '../services/audit.js';
 import { broadcastToAll } from '../services/assignmentBroadcaster.js';
+import bcrypt from 'bcryptjs';
+import { cacheDelete } from '../services/cache.js';
 
 // ── 1. Search employees by sub-vertical ──
 export const getUsersBySubVertical = async (req, res) => {
@@ -685,6 +687,101 @@ export const applyTemplateCustomFields = async (req, res) => {
     });
 
     return res.status(200).json({ success: true, data: { fieldsCreated: created, fieldsSkipped: skipped } });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * POST /users/:userId/set-password
+ * Directly set a user's password (Super Admin only).
+ */
+export const setPasswordByAdmin = async (req, res) => {
+  const { userId } = req.params;
+  const { password, confirmPassword } = req.body;
+
+  try {
+    // 1. Permission Check
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ success: false, error: 'Forbidden: Only Super Administrators can perform this action' });
+    }
+
+    if (!password || !confirmPassword) {
+      return res.status(400).json({ success: false, error: 'Password and confirm password are required' });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({ success: false, error: 'Passwords do not match' });
+    }
+
+    // 2. Fetch target user details for validation
+    const userRes = await query('SELECT id, name, email FROM users WHERE id = $1', [userId]);
+    const targetUser = userRes.rows[0];
+
+    if (!targetUser) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // 3. Password Strength Validation (Server-side)
+    const MIN_PASSWORD_LENGTH = 8;
+    if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters long`
+      });
+    }
+
+    const normalized = password.toLowerCase().trim();
+    const weakPasswords = ['12345678', 'password', 'password123', 'admin123', 'leadsbase', 'talentysheet'];
+    if (weakPasswords.includes(normalized)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password is too common or weak. Please choose a stronger password.'
+      });
+    }
+
+    if (normalized === targetUser.email.toLowerCase().trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "Password cannot be the user's email address."
+      });
+    }
+
+    if (normalized === targetUser.name.toLowerCase().trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "Password cannot be the user's display name."
+      });
+    }
+
+    // 4. Hashing
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    // 5. Update user password in Database
+    await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [passwordHash, userId]);
+
+    // 6. Invalidate all sessions/refresh tokens for the target user
+    await query('DELETE FROM sessions WHERE user_id = $1', [userId]);
+
+    // 7. Purge target user's cached profile
+    await cacheDelete(`user_profile:${userId}`);
+
+    // 8. Audit Log (Never log/store password or password hash)
+    await logAudit(req, {
+      action: 'user.set_password_by_admin',
+      targetCollection: 'users',
+      targetId: userId,
+      before: { email: targetUser.email, name: targetUser.name },
+      after: { email: targetUser.email, name: targetUser.name }
+    });
+
+    // Notify clients of user mutation
+    broadcastToAll({ type: 'USER_MUTATED' });
+
+    return res.status(200).json({
+      success: true,
+      data: { message: 'Password has been updated successfully and all active sessions have been invalidated' }
+    });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

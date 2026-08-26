@@ -3,7 +3,8 @@ import axios from '../api/axios.js';
 import { useAuthStore } from '../store/authStore.js';
 import { 
   Users, UserPlus, Shield, Check, X, ShieldCheck, Mail, Key, Trash2, 
-  ChevronRight, AlertTriangle, AlertCircle, RefreshCw, Briefcase
+  ChevronRight, AlertTriangle, AlertCircle, RefreshCw, Briefcase,
+  Eye, EyeOff
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 export const AdminUsersPage = () => {
@@ -36,6 +37,13 @@ export const AdminUsersPage = () => {
   const [showConfirmRoleModal, setShowConfirmRoleModal] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [pendingRole, setPendingRole] = useState('');
+
+  // Set Password Modal State
+  const [showSetPasswordModal, setShowSetPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [newConfirmPassword, setNewConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [settingPassword, setSettingPassword] = useState(false);
 
   const fetchUsersAndVerticals = async () => {
     setLoading(true);
@@ -133,13 +141,40 @@ export const AdminUsersPage = () => {
     }
   };
 
-  const handleSendResetEmail = async () => {
+  const handleOpenSetPasswordModal = () => {
+    setNewPassword('');
+    setNewConfirmPassword('');
+    setShowNewPassword(false);
+    setShowSetPasswordModal(true);
+  };
+
+  const handleSetPasswordSubmit = async (e) => {
+    e.preventDefault();
     if (!selectedUser) return;
+    if (newPassword !== newConfirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+    if (newPassword.length < 8) {
+      toast.error('Password must be at least 8 characters long');
+      return;
+    }
+
+    setSettingPassword(true);
     try {
-      await axios.post('/api/v1/auth/forgot-password', { email: selectedUser.email });
-      toast.success('Password reset email sent to user');
+      await axios.post(`/api/v1/admin/users/${selectedUser.id}/set-password`, {
+        password: newPassword,
+        confirmPassword: newConfirmPassword
+      });
+      toast.success(`Password for ${selectedUser.name} updated successfully!`);
+      setShowSetPasswordModal(false);
+      setNewPassword('');
+      setNewConfirmPassword('');
+      setShowNewPassword(false);
     } catch (err) {
-      toast.error('Failed to trigger reset email');
+      toast.error(err.response?.data?.error || 'Failed to update user password');
+    } finally {
+      setSettingPassword(false);
     }
   };
 
@@ -402,11 +437,11 @@ export const AdminUsersPage = () => {
               </button>
 
               <button
-                onClick={handleSendResetEmail}
+                onClick={handleOpenSetPasswordModal}
                 className="w-full py-2 border border-[--border-strong] hover:bg-stone-50 text-[--text-secondary] font-semibold text-xs rounded-lg transition-all flex items-center justify-center gap-1.5"
               >
                 <Key size={12} />
-                <span>Send Password Reset</span>
+                <span>Set Password</span>
               </button>
 
               <button
@@ -566,6 +601,105 @@ export const AdminUsersPage = () => {
                 Confirm Alteration
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Set Password Modal */}
+      {showSetPasswordModal && selectedUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm p-4">
+          <div className="glass-panel w-full max-w-md bg-white border border-[--border] shadow-xl p-6 space-y-4">
+            
+            <div className="flex justify-between items-center border-b border-[--border] pb-3">
+              <h3 className="text-md font-bold text-[--text-primary] uppercase tracking-wider flex items-center gap-2">
+                <Key className="text-[--accent]" size={18} />
+                <span>Set Password</span>
+              </h3>
+              <button 
+                onClick={() => setShowSetPasswordModal(false)}
+                className="text-[--text-secondary] hover:text-[--text-primary]"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="bg-stone-50 p-3 rounded-lg border border-[--border] text-xs space-y-1">
+              <span className="font-bold text-[--text-secondary] block uppercase">Target Account</span>
+              <div className="text-[--text-primary] font-semibold text-sm">{selectedUser.name}</div>
+              <div className="text-[--text-secondary] font-mono">{selectedUser.email}</div>
+            </div>
+
+            <form onSubmit={handleSetPasswordSubmit} className="space-y-4 text-xs">
+              <div className="flex flex-col gap-1.5 relative">
+                <label className="font-bold text-[--text-secondary] uppercase">New Password</label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full bg-[--bg-input] border border-[--border-strong] rounded-lg pl-3 pr-10 py-2 text-[--text-primary] focus:outline-none focus:border-[--accent] font-mono"
+                    placeholder="Enter new password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-2.5 text-[--text-muted] hover:text-[--text-primary]"
+                  >
+                    {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="font-bold text-[--text-secondary] uppercase">Confirm Password</label>
+                <input
+                  type={showNewPassword ? "text" : "password"}
+                  required
+                  value={newConfirmPassword}
+                  onChange={(e) => setNewConfirmPassword(e.target.value)}
+                  className="bg-[--bg-input] border border-[--border-strong] rounded-lg px-3 py-2 text-[--text-primary] focus:outline-none focus:border-[--accent] font-mono"
+                  placeholder="Confirm new password"
+                />
+              </div>
+
+              {/* Password strength & matching feedback */}
+              <div className="space-y-1 bg-amber-50/50 p-3 rounded-lg border border-amber-100 text-[11px] text-amber-800">
+                <div className="flex items-center gap-1.5">
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${newPassword.length >= 8 ? 'bg-[#2ecc71]' : 'bg-red-500'}`} />
+                  <span>At least 8 characters long</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${newPassword && newPassword === newConfirmPassword ? 'bg-[#2ecc71]' : 'bg-red-500'}`} />
+                  <span>Passwords match</span>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2 bg-red-50 p-3 rounded-lg border border-red-100 text-[11px] text-red-800 leading-normal">
+                <AlertCircle size={14} className="shrink-0 text-red-600 mt-0.5" />
+                <span>
+                  <strong>Warning:</strong> This will immediately change the password for {selectedUser.name} and sign them out of all devices.
+                </span>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-[--border]">
+                <button
+                  type="button"
+                  onClick={() => setShowSetPasswordModal(false)}
+                  className="px-4 py-2 border border-[--border-strong] rounded-lg text-[--text-secondary] hover:bg-stone-50 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={settingPassword || newPassword.length < 8 || newPassword !== newConfirmPassword}
+                  className="px-4 py-2 bg-[--accent] text-white font-black uppercase rounded-lg hover:bg-[--accent-hover] shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {settingPassword ? 'Updating...' : 'Set Password'}
+                </button>
+              </div>
+            </form>
+
           </div>
         </div>
       )}

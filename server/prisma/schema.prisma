@@ -201,6 +201,7 @@ model CsvUploadLog {
   processingStartedAt   DateTime?
   processingFinishedAt  DateTime?
   failedRowsDownloadUrl String    @default("")
+  columnMapping         Json?     @map("column_mapping")
   costConversions       CostConversion[]
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt

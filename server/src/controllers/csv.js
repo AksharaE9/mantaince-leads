@@ -33,13 +33,13 @@ const sanitizeCsvValue = (val) => {
 // rawDataImportSchema.js) accepts this format natively — verified by
 // tests/unit/server/services/rawDataImportSchema.test.js's DD-MM-YYYY cases.
 const SAMPLE_VALUES = {
-    date: '24-07-2026', employeeName: 'Jane Doe', businessType: 'Retail',
-    businessName: 'Acme Traders', phone: '9876543210', pointOfContact: 'Rahul Sharma',
+    date: '24-07-2026', employeeName: 'Jane Doe', businessType: 'Retail', productService: 'Service',
+    businessName: 'Acme Traders', contactPerson: 'Rahul Sharma', phone: '9876543210', alternateNumber: '9876543211',
     area: 'Whitefield', city: 'Bengaluru', deliveredLocation: '123 Main Street',
+    callStatus: 'Connected', customerResponse: 'Interested', followUpRequired: 'Yes',
+    followUpDate: '05-08-2026', followUpTime: '10:00 AM', nextAction: 'Send proposal',
     remarks: 'Interested, follow up next week', recordings: '',
-    appointmentType: 'Yes', appointmentDate: '01-08-2026', appointmentTime: '11:00 AM',
-    requirement: '50 units', notes: 'Prefers WhatsApp contact',
-    followUpRequired: 'Yes', followUps: '1', followUpDates: '05-08-2026',
+    positive: 'Yes', converted: 'No', appointmentDate: '01-08-2026', appointmentTime: '11:00 AM',
     followUpRemarks: 'Awaiting budget approval',
 };
 
@@ -157,7 +157,7 @@ export const inspectCsvSheets = async (req, res) => {
  * POST /leads/csv/upload
  */
 export const uploadCsv = async (req, res) => {
-    const { verticalId, assignedTo, subVerticalId, leadType = 'CALL' } = req.body;
+    const { verticalId, assignedTo, subVerticalId, leadType = 'CALL', columnMapping } = req.body;
     const file = req.file;
     const section = leadType === 'POSITIVE' ? 'positives' : 'cos';
     // sheetIndices: JSON array of 0-based sheet indices from the sheet picker.
@@ -174,6 +174,15 @@ export const uploadCsv = async (req, res) => {
             }
         }
     } catch { /* ignore malformed sheetIndices — fall back to [0] */ }
+
+    let parsedColumnMapping = null;
+    if (columnMapping) {
+        try {
+            parsedColumnMapping = typeof columnMapping === 'string' ? JSON.parse(columnMapping) : columnMapping;
+        } catch (err) {
+            console.error('⚠️ Failed to parse columnMapping:', err.message);
+        }
+    }
 
     try {
         if (!file) return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'A CSV or Excel file is required', section, operation: 'bulk_upload', field: 'file' });
@@ -201,10 +210,10 @@ export const uploadCsv = async (req, res) => {
         if (process.env.VERCEL) {
             // Vercel Serverless environment: bypass disk writes and run processing inline
             const logRes = await query(`
-                INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, sub_vertical_id, assigned_to, lead_type, sheet_indices)
-                VALUES ($1, $2, $3, $4, $5, 'processing', $6, $7, $8, $9)
+                INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, sub_vertical_id, assigned_to, lead_type, sheet_indices, column_mapping)
+                VALUES ($1, $2, $3, $4, $5, 'processing', $6, $7, $8, $9, $10)
                 RETURNING *
-            `, [logId, req.user.sub, verticalId, fileName, file.originalname, subVerticalId, targetAssignedTo || null, leadType, JSON.stringify(sheetIndices)]);
+            `, [logId, req.user.sub, verticalId, fileName, file.originalname, subVerticalId, targetAssignedTo || null, leadType, JSON.stringify(sheetIndices), parsedColumnMapping ? JSON.stringify(parsedColumnMapping) : null]);
 
             const uploadLog = logRes.rows[0];
 
@@ -229,6 +238,7 @@ export const uploadCsv = async (req, res) => {
                     leadType,
                     fileExt,
                     sheetIndices,
+                    columnMapping: parsedColumnMapping,
                 },
                 progress: async (value) => {
                     console.log(`[Vercel Inline Worker] Job ${uploadLog.id} progress: ${value}%`);
@@ -269,10 +279,10 @@ export const uploadCsv = async (req, res) => {
         fs.writeFileSync(uploadPath, file.buffer);
 
         const logRes = await query(`
-            INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, sub_vertical_id, assigned_to, lead_type, sheet_indices)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, sub_vertical_id, assigned_to, lead_type, sheet_indices, column_mapping)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
-        `, [logId, req.user.sub, verticalId, fileName, file.originalname, 'queued', subVerticalId, targetAssignedTo || null, leadType, JSON.stringify(sheetIndices)]);
+        `, [logId, req.user.sub, verticalId, fileName, file.originalname, 'queued', subVerticalId, targetAssignedTo || null, leadType, JSON.stringify(sheetIndices), parsedColumnMapping ? JSON.stringify(parsedColumnMapping) : null]);
 
         const uploadLog = logRes.rows[0];
 

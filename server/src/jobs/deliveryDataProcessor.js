@@ -416,7 +416,7 @@ async function emitProgress(batchId, uploadedBy, verticalId, status, totalRows, 
  *    batched (one query per key across the whole file), never per-row.
  */
 export const processDeliveryDataJob = async (job) => {
-    const { batchId, fileBufferBase64, verticalId, uploadedBy, fileExt = '.csv', sheetIndices = [0] } = job.data;
+    const { batchId, fileBufferBase64, verticalId, uploadedBy, fileExt = '.csv', sheetIndices = [0], columnMapping = null } = job.data;
 
     let totalRows = 0;
     let successCount = 0;
@@ -447,7 +447,21 @@ export const processDeliveryDataJob = async (job) => {
             getKnownBusinessTypes(verticalId),
         ]);
 
-        const normalizedRows = rows.map(r => toSchemaKeyedRow(normalizeRowKeys(r)));
+        const normalizedRows = rows.map(r => {
+            if (columnMapping) {
+                const row = {};
+                for (const [fieldKey, fileHeader] of Object.entries(columnMapping)) {
+                    if (fileHeader && r[fileHeader] !== undefined) {
+                        row[fieldKey] = r[fileHeader];
+                    } else {
+                        row[fieldKey] = '';
+                    }
+                }
+                return row;
+            } else {
+                return toSchemaKeyedRow(normalizeRowKeys(r));
+            }
+        });
 
         // Composite-key dedup: existing DB rows (fetched by phone superset) + within-file duplicates.
         const filePhones = normalizedRows.map(r => (r.phoneNumber || '').replace(/[^\d+]/g, '')).filter(Boolean);
@@ -496,33 +510,61 @@ export const processDeliveryDataJob = async (job) => {
                 continue;
             }
 
-            // Upfront header validation per sheet
-            const headerCheck = validateFileHeaders(sheetRows);
-            if (!headerCheck.ok) {
-                stats.status = 'failed';
-                errors.push({
-                    row: 0,
-                    code: 'SHEET_ERROR',
-                    reason: `Sheet "${sheetName}" failed template validation: ${headerCheck.fatalError.reason}`,
-                    sheetName,
-                    warning: false
-                });
-                continue;
-            }
+            // Upfront header validation per sheet (only run if no manual mapping is provided)
+            if (!columnMapping) {
+                const headerCheck = validateFileHeaders(sheetRows);
+                if (!headerCheck.ok) {
+                    stats.status = 'failed';
+                    errors.push({
+                        row: 0,
+                        code: 'SHEET_ERROR',
+                        reason: `Sheet "${sheetName}" failed template validation: ${headerCheck.fatalError.reason}`,
+                        sheetName,
+                        warning: false
+                    });
+                    continue;
+                }
 
-            // Match alias matched notices
-            for (const am of headerCheck.aliasMatches) {
-                errors.push({ row: 0, code: 'ALIAS_MATCH', reason: `Sheet "${sheetName}": Matched '${am.originalHeader}' → ${am.schemaLabel}`, sheetName, warning: true });
-            }
-            if (headerCheck.extraColumns.length > 0) {
-                errors.push({ row: 0, code: 'FILE_WARNING', reason: `Sheet "${sheetName}": Unrecognized columns ignored: ${headerCheck.extraColumns.join(', ')}`, sheetName, warning: true });
-            }
-            if (headerCheck.missingOptional.length > 0) {
-                errors.push({ row: 0, code: 'FILE_WARNING', reason: `Sheet "${sheetName}": Optional columns not found in file: ${headerCheck.missingOptional.join(', ')}`, sheetName, warning: true });
+                // Match alias matched notices
+                for (const am of headerCheck.aliasMatches) {
+                    errors.push({ row: 0, code: 'ALIAS_MATCH', reason: `Sheet "${sheetName}": Matched '${am.originalHeader}' → ${am.schemaLabel}`, sheetName, warning: true });
+                }
+                if (headerCheck.extraColumns.length > 0) {
+                    errors.push({ row: 0, code: 'FILE_WARNING', reason: `Sheet "${sheetName}": Unrecognized columns ignored: ${headerCheck.extraColumns.join(', ')}`, sheetName, warning: true });
+                }
+                if (headerCheck.missingOptional.length > 0) {
+                    errors.push({ row: 0, code: 'FILE_WARNING', reason: `Sheet "${sheetName}": Optional columns not found in file: ${headerCheck.missingOptional.join(', ')}`, sheetName, warning: true });
+                }
             }
 
             // Check if required phoneNumber column is present but entirely empty in all rows
-            const sheetNormalized = sheetRows.map(r => toSchemaKeyedRow(normalizeRowKeys(r)));
+            const sheetNormalized = sheetRows.map(r => {
+                if (columnMapping) {
+                    const row = {};
+                    const extraCustom = {};
+                    const mappedHeaders = new Set(Object.values(columnMapping).filter(Boolean));
+                    for (const [fieldKey, fileHeader] of Object.entries(columnMapping)) {
+                        if (fileHeader && r[fileHeader] !== undefined) {
+                            row[fieldKey] = r[fileHeader];
+                        } else {
+                            row[fieldKey] = '';
+                        }
+                    }
+                    for (const [k, v] of Object.entries(r)) {
+                        if (k.startsWith('_')) continue;
+                        if (!mappedHeaders.has(k) && v !== undefined && v !== null && v !== '') {
+                            extraCustom[k] = v;
+                        }
+                    }
+                    if (Object.keys(extraCustom).length > 0) {
+                        row.customData = extraCustom;
+                    }
+                    return row;
+                } else {
+                    return toSchemaKeyedRow(normalizeRowKeys(r));
+                }
+            });
+
             const hasAnyPhone = sheetNormalized.some(r => {
                 const val = r.phoneNumber;
                 return val !== undefined && val !== null && String(val).trim() !== '';

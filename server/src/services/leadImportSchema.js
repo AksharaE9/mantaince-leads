@@ -35,27 +35,54 @@ import { FOLLOWUP_APPEND_FIELDS } from './interactionLogImportSchema.js';
 // itself queries field_configs) — see leadImportTemplate.test.js's
 // phone-number-only-mandatory safeguard checks.
 export const BASE_FIELDS_CALL = [
-    { key: 'date', label: 'Date', csvHeader: 'DATE', type: 'string', required: false },
-    { key: 'employeeName', label: 'Employee Name', csvHeader: 'EMPLOYEE NAME', type: 'string', required: false },
-    { key: 'businessType', label: 'Business Type', csvHeader: 'BUSINESS TYPE', type: 'string', required: false },
-    { key: 'businessName', label: 'Business / Person / Shop / Company Name', csvHeader: 'BUSINESS / PERSON / SHOP / COMPANY NAME', type: 'string', required: false, maxLength: 255 },
-    { key: 'area', label: 'Area', csvHeader: 'AREA', type: 'string', required: false },
-    { key: 'city', label: 'City', csvHeader: 'CITY', type: 'string', required: false },
-    { key: 'phone', label: 'Contact Number', csvHeader: 'CONTACT', type: 'phone', required: true, unique: true },
-    { key: 'deliveredLocation', label: 'Map Location Link / Address', csvHeader: 'MAP LOCATION LINK / ADDRESS', type: 'string', required: false },
-    { key: 'requirement', label: 'Requirement', csvHeader: 'REQUIREMENT', type: 'string', required: false },
-    { key: 'remarks', label: 'Remarks', csvHeader: 'REMARKS', type: 'string', required: false },
-    { key: 'followUpRequired', label: 'Follow Up Require (Yes/No)', csvHeader: 'FOLLOW UP REQUIRE (YES/NO)', type: 'enum', options: ['Yes', 'No'], required: false },
-    { key: 'followUpDate', label: 'Follow Up Date', csvHeader: 'FOLLOW UP DATE', type: 'string', required: false },
-    { key: 'followUpRemarks', label: 'Follow Up Remarks', csvHeader: 'FOLLOW UP REMARKS', type: 'string', required: false },
+    { key: 'date', label: 'Date', csvHeader: 'Date', type: 'string', required: false,
+        aliases: ['Date'] },
+    { key: 'employeeName', label: 'Employee Name', csvHeader: 'Employee Name', type: 'string', required: false,
+        aliases: ['Employee Name', 'Agent Name', 'Employee', 'Agent'] },
+    { key: 'productService', label: 'Product/Service', csvHeader: 'Product/Service', type: 'string', required: false,
+        aliases: ['Product/Service', 'Product Service', 'Business Type', 'Product', 'Service'] },
+    { key: 'businessName', label: 'Lead Name', csvHeader: 'Lead Name', type: 'string', required: false, maxLength: 255,
+        aliases: ['Lead Name', 'Business Name', 'Business / Person / Shop / Company Name', 'BUSINESS / PERSON / SHOP / COMPANY NAME', 'Company Name', 'Shop Name', 'Name'] },
+    { key: 'contactPerson', label: 'Contact Person', csvHeader: 'Contact Person', type: 'string', required: false, maxLength: 255,
+        aliases: ['Contact Person', 'Point of Contact'] },
+    { key: 'phone', label: 'Contact Number', csvHeader: 'Contact Number', type: 'phone', required: true, unique: true,
+        aliases: ['Contact Number', 'Mobile Number', 'CONTACT NUMBER', 'MOBILE NUMBER', 'PHONE NO', 'Phone Number', 'Mobile No', 'Mobile', 'Phone', 'Contact No', 'Contact'] },
+    { key: 'alternateNumber', label: 'Alternate Number(If Any)', csvHeader: 'Alternate Number(If Any)', type: 'string', required: false,
+        aliases: ['Alternate Number(If Any)', 'Alternate Number (If Any)', 'Alternate Number', 'Alt Number'] },
+    { key: 'city', label: 'City', csvHeader: 'City', type: 'string', required: false,
+        aliases: ['City'] },
+    { key: 'area', label: 'Area', csvHeader: 'Area', type: 'string', required: false,
+        aliases: ['Area'] },
+    { key: 'deliveredLocation', label: 'Map Location', csvHeader: 'Map Location', type: 'string', required: false,
+        aliases: ['Map Location', 'Map Location Link / Address', 'Link Address', 'Address', 'Adress'] },
+    { key: 'callStatus', label: 'Call Status', csvHeader: 'Call Status', type: 'enum', options: ['Connected', 'Busy', 'Not Reachable', 'Switched Off', 'Callback Requested', 'Wrong Number', 'Disconnected'], required: false,
+        aliases: ['Call Status', 'Status'] },
+    { key: 'customerResponse', label: 'Customer Response', csvHeader: 'Customer Response', type: 'string', required: false,
+        aliases: ['Customer Response', 'Response', 'Feedback'] },
+    { key: 'followUpRequired', label: 'Follow-up Required', csvHeader: 'Follow-up Required', type: 'enum', options: ['Yes', 'No'], required: false,
+        aliases: ['Follow-up Required', 'Follow Up Required', 'Follow-up Require', 'Follow Up Require (Yes/No)'] },
+    { key: 'followUpDate', label: 'Follow-up Date', csvHeader: 'Follow-up Date', type: 'string', required: false,
+        aliases: ['Follow-up Date', 'Follow Up Date', 'Follow-up Dates', 'Appointment Date'] },
+    { key: 'followUpTime', label: 'Follow-up Time', csvHeader: 'Follow-up Time', type: 'string', required: false,
+        aliases: ['Follow-up Time', 'Follow Up Time', 'Appointment Timings', 'Appointment Time'] },
+    { key: 'nextAction', label: 'Next Action', csvHeader: 'Next Action', type: 'string', required: false,
+        aliases: ['Next Action', 'Action'] },
+    { key: 'remarks', label: 'Remarks', csvHeader: 'Remarks', type: 'string', required: false, maxLength: 500,
+        aliases: ['Remarks', 'Remark', 'Notes', 'Follow-up Remarks', 'Follow Up Remarks'] },
 ];
 
 export const BASE_FIELDS_POSITIVE = [
     ...BASE_FIELDS_CALL,
-    { key: 'positive', label: 'Positive(Y/N)', csvHeader: 'POSITIVE(Y/N)', type: 'string', required: false },
-    { key: 'converted', label: 'Converted (Y/N)', csvHeader: 'CONVERTED (Y/N)', type: 'string', required: false },
-    { key: 'appointmentDate', label: 'Appointment Date', csvHeader: 'APPOINTMENT DATE', type: 'string', required: false },
-    { key: 'appointmentTime', label: 'Appointment Time', csvHeader: 'APPOINTMENT TIME', type: 'string', required: false },
+    { key: 'positive', label: 'Positive (Y/N)', csvHeader: 'Positive (Y/N)', type: 'enum', options: ['Y', 'N', 'Yes', 'No'], required: false,
+        aliases: ['Positive (Y/N)', 'Positive(Y/N)', 'Positive', 'Positive Y/N'] },
+    { key: 'converted', label: 'Converted (Y/N)', csvHeader: 'Converted (Y/N)', type: 'enum', options: ['Y', 'N', 'Yes', 'No'], required: false,
+        aliases: ['Converted (Y/N)', 'Converted(Y/N)', 'Converted', 'Conversion'] },
+    { key: 'appointmentDate', label: 'Appointment Date', csvHeader: 'Appointment Date', type: 'string', required: false,
+        aliases: ['Appointment Date'] },
+    { key: 'appointmentTime', label: 'Appointment Time', csvHeader: 'Appointment Time', type: 'string', required: false,
+        aliases: ['Appointment Time', 'Appointment Timings'] },
+    { key: 'followUpRemarks', label: 'Follow up Remarks', csvHeader: 'Follow up Remarks', type: 'string', required: false,
+        aliases: ['Follow up Remarks', 'Follow-up Remarks'] },
 ];
 
 // field_configs.field_type values (see CreateFieldConfigBody in validators/index.js)
@@ -71,7 +98,12 @@ const ENUM_FIELD_TYPES = new Set(['select', 'multiselect', 'boolean']);
 export async function getLeadImportSchema(verticalId, leadType = 'CALL') {
     const isPositive = leadType === 'POSITIVE';
     const baseFields = isPositive ? BASE_FIELDS_POSITIVE : BASE_FIELDS_CALL;
-    const baseHeaderSet = new Set(baseFields.map(f => f.csvHeader));
+    const baseHeaderSet = new Set(
+        baseFields.flatMap(f => [
+            (f.csvHeader || '').trim().toUpperCase(),
+            ...(f.aliases || []).map(a => a.trim().toUpperCase())
+        ])
+    );
 
     const configs = await withCache(CacheKeys.fieldConfigs(verticalId), TTL.FIELD_CONFIGS, async () => {
         const r = await query(

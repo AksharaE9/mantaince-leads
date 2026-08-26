@@ -417,7 +417,7 @@ export const inspectDeliveryDataSheets = async (req, res) => {
  * loop and log/status/error-report endpoints all just work.
  */
 export const uploadDeliveryDataCsv = async (req, res) => {
-    const { verticalId } = req.body;
+    const { verticalId, columnMapping } = req.body;
     const file = req.file;
     // sheetIndices: JSON array of 0-based sheet indices from the client-side
     // sheet picker. Defaults to [0] for backward compatibility.
@@ -432,6 +432,15 @@ export const uploadDeliveryDataCsv = async (req, res) => {
             }
         }
     } catch { /* ignore malformed sheetIndices */ }
+
+    let parsedColumnMapping = null;
+    if (columnMapping) {
+        try {
+            parsedColumnMapping = typeof columnMapping === 'string' ? JSON.parse(columnMapping) : columnMapping;
+        } catch (err) {
+            console.error('⚠️ Failed to parse columnMapping:', err.message);
+        }
+    }
 
     try {
         if (!file) return operationError(res, { code: ErrorCodes.MISSING_REQUIRED_FIELD, message: 'A CSV or Excel file is required', section: 'delivery_data', operation: 'bulk_upload', field: 'file' });
@@ -449,10 +458,10 @@ export const uploadDeliveryDataCsv = async (req, res) => {
         if (process.env.VERCEL) {
             // Vercel Serverless environment: bypass disk writes and run processing inline
             const logRes = await query(`
-                INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type, sheet_indices)
-                VALUES ($1, $2, $3, $4, $5, 'processing', 'delivery_data', $6)
+                INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type, sheet_indices, column_mapping)
+                VALUES ($1, $2, $3, $4, $5, 'processing', 'delivery_data', $6, $7)
                 RETURNING *
-            `, [logId, req.user.sub, verticalId, fileName, file.originalname, JSON.stringify(sheetIndices)]);
+            `, [logId, req.user.sub, verticalId, fileName, file.originalname, JSON.stringify(sheetIndices), parsedColumnMapping ? JSON.stringify(parsedColumnMapping) : null]);
 
             const uploadLog = logRes.rows[0];
 
@@ -473,6 +482,7 @@ export const uploadDeliveryDataCsv = async (req, res) => {
                     uploadedBy: req.user.sub,
                     fileExt,
                     sheetIndices,
+                    columnMapping: parsedColumnMapping,
                 },
                 progress: async (value) => {
                     console.log(`[Vercel Inline Worker] Job ${uploadLog.id} progress: ${value}%`);
@@ -499,10 +509,10 @@ export const uploadDeliveryDataCsv = async (req, res) => {
         fs.writeFileSync(uploadPath, file.buffer);
 
         const logRes = await query(`
-            INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type, sheet_indices)
-            VALUES ($1, $2, $3, $4, $5, 'queued', 'delivery_data', $6)
+            INSERT INTO csv_upload_logs (id, uploaded_by, vertical_id, file_name, original_file_name, status, entity_type, sheet_indices, column_mapping)
+            VALUES ($1, $2, $3, $4, $5, 'queued', 'delivery_data', $6, $7)
             RETURNING *
-        `, [logId, req.user.sub, verticalId, fileName, file.originalname, JSON.stringify(sheetIndices)]);
+        `, [logId, req.user.sub, verticalId, fileName, file.originalname, JSON.stringify(sheetIndices), parsedColumnMapping ? JSON.stringify(parsedColumnMapping) : null]);
 
         const uploadLog = logRes.rows[0];
         await logAudit(req, {

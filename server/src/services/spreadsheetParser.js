@@ -126,18 +126,14 @@ function parseWorksheet(sheet, sheetName) {
                hs.includes('address') || hs.includes('remarks') || hs.includes('requirement');
     });
 
-    const standardHeaders = [
-        'DATE', 'EMPLOYEE NAME', 'BUSINESS TYPE', 'BUSINESS / PERSON / SHOP / COMPANY NAME',
-        'AREA', 'CITY', 'CONTACT', 'MAP LOCATION LINK / ADDRESS',
-        'REQUIREMENT', 'REMARKS', 'FOLLOW UP REQUIRE (YES/NO)', 'FOLLOW UP DATE', 'FOLLOW UP REMARKS'
-    ];
+    if (!isHeaderRow) {
+        throw Object.assign(
+            new Error(`Sheet "${sheetName}" does not have a recognizable header row. Please make sure the first row contains column headers (like Date, Employee Name, Contact Number, etc.).`),
+            { status: 400 }
+        );
+    }
 
     let startRow = 2;
-    if (!isHeaderRow && maxCol >= 6) {
-        headers = standardHeaders;
-        startRow = 1;
-        warnings.push(`Sheet "${sheetName}": No header row detected — automatically mapped by column order.`);
-    }
 
     const rows = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {

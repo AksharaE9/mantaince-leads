@@ -40,15 +40,19 @@ import { extractErrorMessage } from '../utils/errorMessage.js';
 
 const BASE_DYNAMIC_FIELDS = [
   { key: 'date', label: 'Date', type: 'date', defaultValue: '' },
-  { key: 'businessType', label: 'Business Type', type: 'text', defaultValue: '' },
+  { key: 'productService', label: 'Product/Service', type: 'text', defaultValue: '' },
+  { key: 'contactPerson', label: 'Contact Person', type: 'text', defaultValue: '' },
+  { key: 'alternateNumber', label: 'Alternate Number(If Any)', type: 'text', defaultValue: '' },
   { key: 'area', label: 'Area', type: 'text', defaultValue: '' },
   { key: 'city', label: 'City', type: 'text', defaultValue: '' },
-  { key: 'deliveredLocation', label: 'Map Location Link / Address', type: 'text', defaultValue: '' },
-  { key: 'requirement', label: 'Requirement', type: 'text', defaultValue: '' },
+  { key: 'deliveredLocation', label: 'Map Location', type: 'text', defaultValue: '' },
+  { key: 'callStatus', label: 'Call Status', type: 'select', defaultValue: '', options: ['Connected', 'Busy', 'Not Reachable', 'Switched Off', 'Callback Requested', 'Wrong Number', 'Disconnected'] },
+  { key: 'customerResponse', label: 'Customer Response', type: 'text', defaultValue: '' },
+  { key: 'followUpRequired', label: 'Follow-up Required', type: 'select', defaultValue: '', options: ['Yes', 'No'] },
+  { key: 'followUpDate', label: 'Follow-up Date', type: 'date', defaultValue: '' },
+  { key: 'followUpTime', label: 'Follow-up Time', type: 'text', defaultValue: '' },
+  { key: 'nextAction', label: 'Next Action', type: 'text', defaultValue: '' },
   { key: 'remarks', label: 'Remarks', type: 'text', defaultValue: '' },
-  { key: 'followUpRequired', label: 'Follow Up Require (Yes/No)', type: 'select', defaultValue: '', options: ['Yes', 'No'] },
-  { key: 'followUpDate', label: 'Follow Up Date', type: 'date', defaultValue: '' },
-  { key: 'followUpRemarks', label: 'Follow Up Remarks', type: 'text', defaultValue: '' },
 ];
 
 const BASE_DYNAMIC_FIELD_KEYS = new Set([
@@ -1291,23 +1295,33 @@ export const LeadsPage = () => {
                     />
                   </FormField>
 
-                  <FormField label="Business Type">
+                  <FormField label="Product/Service">
                     <input
                       type="text"
                       placeholder="-"
-                      value={getDynamicValue(leadFormDynamic, 'businessType')}
-                      onChange={(event) => handleDynamicChange('businessType', event.target.value)}
+                      value={getDynamicValue(leadFormDynamic, 'productService')}
+                      onChange={(event) => handleDynamicChange('productService', event.target.value)}
                     />
                   </FormField>
 
-                  <FormField label="BUSINESS / PERSON / SHOP / COMPANY NAME">
+                  <FormField label="Lead Name *">
                     <input
+                      required
                       placeholder="-"
                       value={leadFormName}
                       onChange={(event) => {
                         setLeadFormName(event.target.value);
                         setLeadFormBusiness(event.target.value);
                       }}
+                    />
+                  </FormField>
+
+                  <FormField label="Contact Person">
+                    <input
+                      type="text"
+                      placeholder="-"
+                      value={getDynamicValue(leadFormDynamic, 'contactPerson')}
+                      onChange={(event) => handleDynamicChange('contactPerson', event.target.value)}
                     />
                   </FormField>
 
@@ -1319,20 +1333,12 @@ export const LeadsPage = () => {
                     />
                   </FormField>
 
-                  <FormField label="Point of Contact">
+                  <FormField label="Alternate Number(If Any)">
                     <input
                       type="text"
                       placeholder="-"
-                      value={getDynamicValue(leadFormDynamic, 'pointOfContact')}
-                      onChange={(event) => handleDynamicChange('pointOfContact', event.target.value)}
-                    />
-                  </FormField>
-                  <FormField label="Area">
-                    <input
-                      type="text"
-                      placeholder="-"
-                      value={getDynamicValue(leadFormDynamic, 'area')}
-                      onChange={(event) => handleDynamicChange('area', event.target.value)}
+                      value={getDynamicValue(leadFormDynamic, 'alternateNumber')}
+                      onChange={(event) => handleDynamicChange('alternateNumber', event.target.value)}
                     />
                   </FormField>
 
@@ -1345,12 +1351,79 @@ export const LeadsPage = () => {
                     />
                   </FormField>
 
-                  <FormField label="Link Address">
+                  <FormField label="Area">
+                    <input
+                      type="text"
+                      placeholder="-"
+                      value={getDynamicValue(leadFormDynamic, 'area')}
+                      onChange={(event) => handleDynamicChange('area', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Map Location">
                     <input
                       type="text"
                       placeholder="-"
                       value={getDynamicValue(leadFormDynamic, 'deliveredLocation')}
                       onChange={(event) => handleDynamicChange('deliveredLocation', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Call Status">
+                    <select
+                      value={getDynamicValue(leadFormDynamic, 'callStatus')}
+                      onChange={(event) => handleDynamicChange('callStatus', event.target.value)}
+                    >
+                      <option value="">-- Select --</option>
+                      {['Connected', 'Busy', 'Not Reachable', 'Switched Off', 'Callback Requested', 'Wrong Number', 'Disconnected'].map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </FormField>
+
+                  <FormField label="Customer Response">
+                    <input
+                      type="text"
+                      placeholder="-"
+                      value={getDynamicValue(leadFormDynamic, 'customerResponse')}
+                      onChange={(event) => handleDynamicChange('customerResponse', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Follow-up Required">
+                    <select
+                      value={getDynamicValue(leadFormDynamic, 'followUpRequired')}
+                      onChange={(event) => handleDynamicChange('followUpRequired', event.target.value)}
+                    >
+                      <option value="">-- Select --</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </FormField>
+
+                  <FormField label="Follow-up Date">
+                    <input
+                      type="date"
+                      value={getDynamicValue(leadFormDynamic, 'followUpDate')}
+                      onChange={(event) => handleDynamicChange('followUpDate', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Follow-up Time">
+                    <input
+                      type="text"
+                      placeholder="-"
+                      value={getDynamicValue(leadFormDynamic, 'followUpTime')}
+                      onChange={(event) => handleDynamicChange('followUpTime', event.target.value)}
+                    />
+                  </FormField>
+
+                  <FormField label="Next Action">
+                    <input
+                      type="text"
+                      placeholder="-"
+                      value={getDynamicValue(leadFormDynamic, 'nextAction')}
+                      onChange={(event) => handleDynamicChange('nextAction', event.target.value)}
                     />
                   </FormField>
 
@@ -1362,61 +1435,7 @@ export const LeadsPage = () => {
                       onChange={(event) => handleDynamicChange('remarks', event.target.value)}
                     />
                   </FormField>
-
-                  <FormField label="Recordings">
-                    <input
-                      type="text"
-                      placeholder="-"
-                      value={getDynamicValue(leadFormDynamic, 'recordings')}
-                      onChange={(event) => handleDynamicChange('recordings', event.target.value)}
-                    />
-                  </FormField>
-
-                  <FormField label="Appointment type (yes or no)">
-                    <select
-                      value={getDynamicValue(leadFormDynamic, 'appointmentType')}
-                      onChange={(event) => handleDynamicChange('appointmentType', event.target.value)}
-                    >
-                      <option value="">-- Select --</option>
-                      <option value="YES">YES</option>
-                      <option value="NO">NO</option>
-                    </select>
-                  </FormField>
-
-                  <FormField label="Appointment date">
-                    <input
-                      type="date"
-                      value={getDynamicValue(leadFormDynamic, 'appointmentDate')}
-                      onChange={(event) => handleDynamicChange('appointmentDate', event.target.value)}
-                    />
-                  </FormField>
-
-                  <FormField label="Appointment time">
-                    <input
-                      type="text"
-                      placeholder="-"
-                      value={getDynamicValue(leadFormDynamic, 'appointmentTime')}
-                      onChange={(event) => handleDynamicChange('appointmentTime', event.target.value)}
-                    />
-                  </FormField>
-
-                  <FormField label="Requirement order if any">
-                    <input
-                      type="text"
-                      placeholder="-"
-                      value={getDynamicValue(leadFormDynamic, 'requirement')}
-                      onChange={(event) => handleDynamicChange('requirement', event.target.value)}
-                    />
-                  </FormField>
-
-                  <FormField label="Notes to the cos if any">
-                    <input
-                      type="text"
-                      placeholder="-"
-                      value={getDynamicValue(leadFormDynamic, 'notes')}
-                      onChange={(event) => handleDynamicChange('notes', event.target.value)}
-                    />
-                  </FormField>
+                </FormSection>
 
                   {leadFormLeadType === 'FIELD' && (
                     <div className="col-span-1 md:col-span-2 xl:col-span-3">

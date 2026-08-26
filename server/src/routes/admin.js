@@ -13,17 +13,22 @@ import {
   deleteSubVerticalStage,
   reorderSubVerticalStages,
   getAdminDashboardStats,
-  applyTemplateCustomFields
+  applyTemplateCustomFields,
+  setPasswordByAdmin
 } from '../controllers/admin.js';
 import authenticate from '../middleware/authenticate.js';
 import attachRole from '../middleware/attachRole.js';
 import checkPermission from '../middleware/checkPermission.js';
 import { timingReport } from '../middleware/timing.js';
+import rateLimiter from '../middleware/rateLimit.js';
 
 const router = express.Router();
 
 router.use(authenticate);
 router.use(attachRole);
+
+// Set user password by admin (Super Admin only)
+router.post('/users/:userId/set-password', checkPermission('users:update'), rateLimiter('set-password', 5, 60), setPasswordByAdmin);
 
 // Sub-vertical custom fields CRUD
 router.get('/sub-verticals/:subVerticalId/custom-fields', checkPermission(['vertical:read', 'leads:read_own', 'leads:read']), getCustomFields);

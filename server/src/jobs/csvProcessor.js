@@ -277,7 +277,7 @@ function validateCsvFileHeaders(rawRows, leadType) {
  * Queue processor function — called by worker.js for each queued CSV upload.
  */
 const processCsvJob = async (job) => {
-    const { batchId, fileBufferBase64, verticalId, uploadedBy, assignedTo, subVerticalId, leadType = 'CALL', fileExt = '.csv', sheetIndices = [0] } = job.data;
+    const { batchId, fileBufferBase64, verticalId, uploadedBy, assignedTo, subVerticalId, leadType = 'CALL', fileExt = '.csv', sheetIndices = [0], columnMapping = null } = job.data;
 
     // ── 1. Resolve default assignee name ─────────────────────────────────────
     let defaultAssigneeName = '';
@@ -403,39 +403,58 @@ const processCsvJob = async (job) => {
                 continue;
             }
 
-            // Upfront header check per sheet
-            const csvHeaderCheck = validateCsvFileHeaders(sheetRows, leadType);
-            if (!csvHeaderCheck.ok) {
-                stats.status = 'failed';
-                errors.push({
-                    row: 0,
-                    code: 'SHEET_ERROR',
-                    reason: `Sheet "${sheetName}" failed template validation: ${csvHeaderCheck.fatalError.reason}`,
-                    sheetName,
-                    warning: false
-                });
-                continue;
-            }
+            // Upfront header check per sheet (only run if no manual mapping is provided)
+            if (!columnMapping) {
+                const csvHeaderCheck = validateCsvFileHeaders(sheetRows, leadType);
+                if (!csvHeaderCheck.ok) {
+                    stats.status = 'failed';
+                    errors.push({
+                        row: 0,
+                        code: 'SHEET_ERROR',
+                        reason: `Sheet "${sheetName}" failed template validation: ${csvHeaderCheck.fatalError.reason}`,
+                        sheetName,
+                        warning: false
+                    });
+                    continue;
+                }
 
-            // Unrecognized columns warning per sheet
-            if (csvHeaderCheck.extraColumns && csvHeaderCheck.extraColumns.length > 0) {
-                errors.push({
-                    row: 0,
-                    code: 'FILE_WARNING',
-                    reason: `Sheet "${sheetName}": Unrecognized columns ignored: ${csvHeaderCheck.extraColumns.join(', ')}`,
-                    sheetName,
-                    warning: true,
-                });
+                // Unrecognized columns warning per sheet
+                if (csvHeaderCheck.extraColumns && csvHeaderCheck.extraColumns.length > 0) {
+                    errors.push({
+                        row: 0,
+                        code: 'FILE_WARNING',
+                        reason: `Sheet "${sheetName}": Unrecognized columns ignored: ${csvHeaderCheck.extraColumns.join(', ')}`,
+                        sheetName,
+                        warning: true,
+                    });
+                }
             }
 
             // Check if phone column is entirely empty in all rows
-            const sheetNormalized = sheetRows.map(r => normalizeRowKeys(r));
+            const sheetNormalized = sheetRows.map(r => {
+                if (columnMapping) {
+                    const row = {};
+                    for (const [fieldKey, fileHeader] of Object.entries(columnMapping)) {
+                        if (fileHeader && r[fileHeader] !== undefined) {
+                            row[fieldKey] = r[fileHeader];
+                        } else {
+                            row[fieldKey] = '';
+                        }
+                    }
+                    return row;
+                } else {
+                    return normalizeRowKeys(r);
+                }
+            });
+
             const hasAnyPhone = sheetNormalized.some(r => {
-                const phoneKey = r['contact number'] || r['phone number'] || r['mobile number'] ||
-                                 r['contact'] || r['phone'] || r['mobile'] ||
-                                 r['contact no'] || r['phone no'] || r['mobile no'] ||
-                                 r['phone no.'] || r['mobile no.'] || r['contact no.'] ||
-                                 r['number'] || '';
+                const phoneKey = columnMapping 
+                    ? r['phone']
+                    : (r['contact number'] || r['phone number'] || r['mobile number'] ||
+                       r['contact'] || r['phone'] || r['mobile'] ||
+                       r['contact no'] || r['phone no'] || r['mobile no'] ||
+                       r['phone no.'] || r['mobile no.'] || r['contact no.'] ||
+                       r['number'] || '');
                 return phoneKey && sanitizePhone(phoneKey) !== '';
             });
 
@@ -458,20 +477,18 @@ const processCsvJob = async (job) => {
                 const row = sheetNormalized[idx];
 
                 const rawPhone = sanitizePhone(
+                    columnMapping ? row['phone'] : (
                     row['contact number'] || row['phone number'] || row['mobile number'] ||
                     row['contact'] || row['phone'] || row['mobile'] ||
                     row['contact no'] || row['phone no'] || row['mobile no'] ||
                     row['phone no.'] || row['mobile no.'] || row['contact no.'] ||
-                    row['number'] || ''
+                    row['number'] || '')
                 );
-                const rawName =
+                const rawName = columnMapping ? row['businessName'] : (
                     row['business/person/shop/company name'] ||
                     row['business person, shop, and company name'] ||
-                    row['name'] || row['business'] || row['business name'] || '';
-                const rawBusiness =
-                    row['business/person/shop/company name'] ||
-                    row['business person, shop, and company name'] ||
-                    row['business'] || row['business name'] || '';
+                    row['name'] || row['business'] || row['business name'] || '');
+                const rawBusiness = rawName;
 
                 if (!rawPhone) {
                     stats.failed++;
@@ -521,24 +538,34 @@ const processCsvJob = async (job) => {
                 phoneSet.add(rawPhone);
 
                 const dataMap = {};
-                dataMap['date']              = row['date'] || '';
-                dataMap['employeeName']      = defaultAssigneeName || row['employee name'] || '';
-                dataMap['businessType']      = row['business type'] || '';
-                dataMap['businessName']      = rawBusiness;
-                dataMap['area']              = row['area'] || '';
-                dataMap['city']              = row['city'] || '';
-                dataMap['deliveredLocation'] = row['map location link/address'] || row['map location link / address'] || row['link address'] || row['delivered location'] || row['address'] || '';
-                dataMap['requirement']       = row['requirement'] || row['requirement if any'] || row['requirement order if any'] || '';
-                dataMap['remarks']           = row['remarks'] || '';
-                dataMap['followUpRequired']  = row['follow up require (yes/no)'] || row['follow-up require (yes/no)'] || row['follow-up required'] || row['appointment type (yes or no)'] || row['appointment type'] || '';
-                dataMap['followUpDate']      = row['follow up date'] || row['follow-up date'] || row['follow-up dates'] || row['appointment date'] || '';
-                dataMap['followUpRemarks']   = row['follow up remarks'] || row['follow-up remarks'] || row['notes to the cos if any'] || row['a notes to the cos team only'] || row['notes'] || '';
+                if (columnMapping) {
+                    const schemaFields = leadType === 'POSITIVE' ? BASE_FIELDS_POSITIVE : BASE_FIELDS_CALL;
+                    for (const field of schemaFields) {
+                        dataMap[field.key] = row[field.key] || '';
+                    }
+                    if (!dataMap['employeeName']) {
+                        dataMap['employeeName'] = defaultAssigneeName;
+                    }
+                } else {
+                    dataMap['date']              = row['date'] || '';
+                    dataMap['employeeName']      = defaultAssigneeName || row['employee name'] || '';
+                    dataMap['businessType']      = row['business type'] || '';
+                    dataMap['businessName']      = rawBusiness;
+                    dataMap['area']              = row['area'] || '';
+                    dataMap['city']              = row['city'] || '';
+                    dataMap['deliveredLocation'] = row['map location link/address'] || row['map location link / address'] || row['link address'] || row['delivered location'] || row['address'] || '';
+                    dataMap['requirement']       = row['requirement'] || row['requirement if any'] || row['requirement order if any'] || '';
+                    dataMap['remarks']           = row['remarks'] || '';
+                    dataMap['followUpRequired']  = row['follow up require (yes/no)'] || row['follow-up require (yes/no)'] || row['follow-up required'] || row['appointment type (yes or no)'] || row['appointment type'] || '';
+                    dataMap['followUpDate']      = row['follow up date'] || row['follow-up date'] || row['follow-up dates'] || row['appointment date'] || '';
+                    dataMap['followUpRemarks']   = row['follow up remarks'] || row['follow-up remarks'] || row['notes to the cos if any'] || row['a notes to the cos team only'] || row['notes'] || '';
 
-                if (leadType === 'POSITIVE') {
-                    dataMap['positive']          = row['positive(y/n)'] || row['positive'] || '';
-                    dataMap['converted']         = row['converted (y/n)'] || row['converted'] || '';
-                    dataMap['appointmentDate']   = row['appointment date'] || '';
-                    dataMap['appointmentTime']   = row['appointment time'] || row['appointment timings'] || '';
+                    if (leadType === 'POSITIVE') {
+                        dataMap['positive']          = row['positive(y/n)'] || row['positive'] || '';
+                        dataMap['converted']         = row['converted (y/n)'] || row['converted'] || '';
+                        dataMap['appointmentDate']   = row['appointment date'] || '';
+                        dataMap['appointmentTime']   = row['appointment time'] || row['appointment timings'] || '';
+                    }
                 }
 
                 for (const cfg of configs) {
@@ -548,15 +575,21 @@ const processCsvJob = async (job) => {
                         header !== '__proto__' && header !== 'constructor' && header !== 'prototype' &&
                         fieldKey !== '__proto__' && fieldKey !== 'constructor' && fieldKey !== 'prototype'
                     ) {
-                        if (row[header] !== undefined) {
-                            dataMap[fieldKey] = row[header];
-                        } else if (dataMap[fieldKey] === undefined) {
-                            dataMap[fieldKey] = '';
+                        if (columnMapping) {
+                            if (row[fieldKey] !== undefined) {
+                                dataMap[fieldKey] = row[fieldKey];
+                            }
+                        } else {
+                            if (row[header] !== undefined) {
+                                dataMap[fieldKey] = row[header];
+                            } else if (dataMap[fieldKey] === undefined) {
+                                dataMap[fieldKey] = '';
+                            }
                         }
                     }
                 }
 
-                const empSpokenName = (row['employee name'] || '').toLowerCase().trim();
+                const empSpokenName = (columnMapping ? row['employeeName'] : (row['employee name'] || '')).toLowerCase().trim();
                 const rowAssignedTo = assignedTo || agentMap.get(empSpokenName) || null;
 
                 validLeads.push({

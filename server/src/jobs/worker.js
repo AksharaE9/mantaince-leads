@@ -73,7 +73,8 @@ async function startImportWorkerLoop() {
           assignedTo: log.assigned_to,
           leadType: log.lead_type || 'CALL',
           fileExt: path.extname(log.file_name || '') || '.csv',
-          sheetIndices
+          sheetIndices,
+          columnMapping: log.column_mapping
         },
         progress: async (value) => {
           console.log(`[Worker] Job ${log.id} progress: ${value}%`);

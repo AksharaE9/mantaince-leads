@@ -5,9 +5,98 @@ import toast from 'react-hot-toast';
 import axios from '../api/axios.js';
 import Loader from './Loader.jsx';
 import SearchableOperatorSelect from './SearchableOperatorSelect.jsx';
-import { normalizeHeaderKey, validateParsedRowsAgainstSchema } from '../utils/leadImportValidation.js';
+import { normalizeHeaderKey, validateParsedRowsAgainstSchema, validateParsedRowsWithMapping } from '../utils/leadImportValidation.js';
 import { downloadCsvFromEndpoint } from '../utils/downloadReport.js';
 import { extractErrorMessage } from '../utils/errorMessage.js';
+
+const editDistance = (s1, s2) => {
+  s1 = s1.toLowerCase();
+  s2 = s2.toLowerCase();
+  const costs = [];
+  for (let i = 0; i <= s1.length; i++) {
+    let lastValue = i;
+    for (let j = 0; j <= s2.length; j++) {
+      if (i === 0) {
+        costs[j] = j;
+      } else {
+        if (j > 0) {
+          let newValue = costs[j - 1];
+          if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+          }
+          costs[j - 1] = lastValue;
+          lastValue = newValue;
+        }
+      }
+    }
+    if (i > 0) {
+      costs[s2.length] = lastValue;
+    }
+  }
+  return costs[s2.length];
+};
+
+const getSimilarity = (s1, s2) => {
+  let longer = s1;
+  let shorter = s2;
+  if (s1.length < s2.length) {
+    longer = s2;
+    shorter = s1;
+  }
+  const longerLength = longer.length;
+  if (longerLength === 0) {
+    return 1.0;
+  }
+  return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
+};
+
+const findBestMatch = (field, columns) => {
+  const labelLower = (field.label || '').toLowerCase().trim();
+  const keyLower = (field.key || '').toLowerCase().trim();
+  const headerLower = (field.csvHeader || '').toLowerCase().trim();
+  
+  const fieldAliases = new Set([labelLower, keyLower, headerLower]);
+  if (field.aliases) {
+    field.aliases.forEach(a => fieldAliases.add(a.toLowerCase().trim()));
+  }
+  if (field.key === 'phone' || field.key === 'phoneNumber') {
+    ['contact number', 'contact', 'contact no', 'number', 'phone', 'mobile', 'mobile number', 'phone number', 'mobile no', 'phone no', 'mobile no.', 'phone no.', 'contact no.'].forEach(a => fieldAliases.add(a));
+  }
+  if (field.key === 'businessName' || field.key === 'leadName') {
+    ['business name', 'lead name', 'company name', 'shop name', 'business / person / shop / company name', 'business/person/shop/company name', 'business person, shop, and company name', 'name'].forEach(a => fieldAliases.add(a));
+  }
+  if (field.key === 'deliveredLocation' || field.key === 'mapLocation' || field.key === 'address') {
+    ['map location', 'link address', 'address', 'map location link / address', 'map location link/address', 'delivered location', 'deliveredlocation', 'delivered_location'].forEach(a => fieldAliases.add(a));
+  }
+  if (field.key === 'productService' || field.key === 'product_service') {
+    ['product/service', 'product service', 'product', 'service', 'business type'].forEach(a => fieldAliases.add(a));
+  }
+
+  for (const col of columns) {
+    const colLower = col.toLowerCase().trim();
+    if (fieldAliases.has(colLower)) return col;
+  }
+
+  for (const col of columns) {
+    const colLower = col.toLowerCase().trim();
+    for (const alias of fieldAliases) {
+      if (colLower.includes(alias) || alias.includes(colLower)) return col;
+    }
+  }
+
+  let best = null;
+  let highest = 0.0;
+  for (const col of columns) {
+    for (const alias of fieldAliases) {
+      const sim = getSimilarity(alias, col);
+      if (sim > highest && sim > 0.6) {
+        highest = sim;
+        best = col;
+      }
+    }
+  }
+  return best;
+};
 
 const ACCEPTED_EXTENSIONS = ['.csv', '.xlsx', '.xls'];
 
@@ -63,6 +152,10 @@ export default function CsvImportModal({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [sheetsList, setSheetsList] = useState([]);
   const [selectedSheetIndices, setSelectedSheetIndices] = useState([0]);
+  const [columnMapping, setColumnMapping] = useState(null);
+  const [columnsInFile, setColumnsInFile] = useState([]);
+  const [schemaFields, setSchemaFields] = useState([]);
+  const [rawRows, setRawRows] = useState([]);
   // Track whether onImportComplete was already called (prevents double-fire from Done button)
   const importCompletedRef = React.useRef(false);
 
@@ -70,6 +163,10 @@ export default function CsvImportModal({
     if (open) {
       setSubVerticalId(defaultSubVerticalId || '');
       setCurrentLeadType(leadType || leadTypeOptions?.[0]?.value || 'CALL');
+      setColumnMapping(null);
+      setColumnsInFile([]);
+      setSchemaFields([]);
+      setRawRows([]);
       importCompletedRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -125,10 +222,10 @@ export default function CsvImportModal({
         const sheetName = workbook.SheetNames[activeIndex] || workbook.SheetNames[0];
         if (sheetName) {
           const sheet = workbook.Sheets[sheetName];
-          const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          const sheetRowsParsed = XLSX.utils.sheet_to_json(sheet, { defval: '' });
           
           // Format Date objects to DD-MM-YYYY string for preview
-          const normalizedRows = rawRows.map((r) => {
+          const normalizedRows = sheetRowsParsed.map((r) => {
             const obj = {};
             Object.entries(r).forEach(([k, v]) => {
               let val = v;
@@ -142,8 +239,38 @@ export default function CsvImportModal({
             });
             return obj;
           });
-          const result = validateParsedRowsAgainstSchema(normalizedRows, schema);
-          if (!cancelled) setFilePreview(result);
+
+          const cols = sheetRowsParsed.length > 0 ? Object.keys(sheetRowsParsed[0]).filter(k => !k.startsWith('_')) : [];
+
+          // Resolve stored/reconciled column mapping
+          const sectionKey = endpoints?.upload ? (endpoints.upload() + '-' + currentLeadType) : `leads-${currentLeadType}`;
+          const storageKey = `upload_map_${vertical._id}_${sectionKey}`;
+          const savedMappingStr = localStorage.getItem(storageKey);
+          let initialMapping = {};
+          if (savedMappingStr) {
+            try {
+              initialMapping = JSON.parse(savedMappingStr);
+            } catch {}
+          }
+
+          const reconciledMapping = {};
+          schema.forEach(field => {
+            const savedCol = initialMapping[field.key];
+            if (savedCol && cols.includes(savedCol)) {
+              reconciledMapping[field.key] = savedCol;
+            } else {
+              reconciledMapping[field.key] = findBestMatch(field, cols) || '';
+            }
+          });
+
+          if (!cancelled) {
+            setColumnMapping(reconciledMapping);
+            setColumnsInFile(cols);
+            setSchemaFields(schema);
+            setRawRows(normalizedRows);
+            const result = validateParsedRowsWithMapping(normalizedRows, schema, reconciledMapping);
+            setFilePreview(result);
+          }
         }
       } catch (err) {
         console.error('Preview error:', err);
@@ -182,6 +309,22 @@ export default function CsvImportModal({
     }
   };
 
+  const handleMappingChange = (fieldKey, selectedColumn) => {
+    const updated = { ...columnMapping, [fieldKey]: selectedColumn };
+    setColumnMapping(updated);
+    
+    const sectionKey = endpoints?.upload ? (endpoints.upload() + '-' + currentLeadType) : `leads-${currentLeadType}`;
+    const storageKey = `upload_map_${vertical._id}_${sectionKey}`;
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+    
+    if (rawRows.length > 0 && schemaFields.length > 0) {
+      const result = validateParsedRowsWithMapping(rawRows, schemaFields, updated);
+      setFilePreview(result);
+    }
+  };
+
+  const isMappingInvalid = schemaFields.some(f => f.required && !columnMapping?.[f.key]);
+
   const handleClose = () => {
     importCompletedRef.current = false;
     setSelectedFile(null);
@@ -190,6 +333,10 @@ export default function CsvImportModal({
     setUploadProgress(0);
     setUploadResult(null);
     setFilePreview(null);
+    setColumnMapping(null);
+    setColumnsInFile([]);
+    setSchemaFields([]);
+    setRawRows([]);
     onClose?.();
   };
 
@@ -197,6 +344,10 @@ export default function CsvImportModal({
     e.preventDefault();
     if (!selectedFile) {
       toast.error('Please select a file first');
+      return;
+    }
+    if (isMappingInvalid) {
+      toast.error('Please map all required columns before importing');
       return;
     }
     if (showSubVertical && !subVerticalId && subVerticals.length > 0) {
@@ -219,6 +370,9 @@ export default function CsvImportModal({
     if (showAssignOperator && assignTarget) formData.append('assignedTo', assignTarget);
     if (sheetsList.length > 1) {
       formData.append('sheetIndices', JSON.stringify(selectedSheetIndices));
+    }
+    if (columnMapping) {
+      formData.append('columnMapping', JSON.stringify(columnMapping));
     }
 
     try {
@@ -410,7 +564,52 @@ export default function CsvImportModal({
             )}
 
             {filePreview && !previewLoading && !filePreview.previewFailed && (
-              <div className="space-y-2">
+              <div className="space-y-4">
+                {/* Column Mapping Section */}
+                {schemaFields.length > 0 && (
+                  <div className="bg-stone-50 border border-stone-200 rounded-xl p-4 space-y-3">
+                    <div className="flex flex-col gap-1 border-b border-stone-200 pb-2">
+                      <span className="text-xs font-black uppercase text-[--text-primary] tracking-wider">
+                        Match File Columns
+                      </span>
+                      <span className="text-[10px] text-stone-500 font-bold">
+                        Map headers from your spreadsheet to matching system fields.
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
+                      {schemaFields.map((field) => {
+                        const selectedVal = columnMapping?.[field.key] || '';
+                        return (
+                          <div key={field.key} className="flex flex-col gap-1 bg-white p-2.5 rounded-lg border border-stone-200 shadow-sm hover:border-stone-300 transition-all">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-bold text-stone-700">
+                                {field.label} {field.required && <span className="text-red-500">*</span>}
+                              </span>
+                              {field.required && !selectedVal && (
+                                <span className="text-[9px] bg-red-50 text-red-500 font-black px-1.5 py-0.5 rounded-full uppercase">
+                                  Required
+                                </span>
+                              )}
+                            </div>
+                            <select
+                              value={selectedVal}
+                              onChange={(e) => handleMappingChange(field.key, e.target.value)}
+                              className="w-full bg-[--bg-input] border border-[--border-strong] rounded-md px-2 py-1 text-[11px] mt-1 focus:outline-none focus:border-[--accent] font-medium"
+                            >
+                              <option value="">-- Skip / Leave Empty --</option>
+                              {columnsInFile.map((col) => (
+                                <option key={col} value={col}>
+                                  {col}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className={`text-xs rounded-lg border p-3 space-y-1.5 ${filePreview.invalidCount > 0 ? 'border-amber-200 bg-amber-50/50' : 'border-emerald-200 bg-emerald-50/50'}`}>
                   <p className="font-semibold">
                     {filePreview.validCount} of {filePreview.totalRows} rows look valid
@@ -524,7 +723,12 @@ export default function CsvImportModal({
                 </button>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
+                {isMappingInvalid && (
+                  <span className="text-[10px] text-red-500 font-bold bg-red-50 px-2.5 py-1.5 rounded-lg border border-red-100 flex items-center gap-1 animate-pulse">
+                    ⚠️ Map all required fields
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={handleClose}
@@ -534,7 +738,7 @@ export default function CsvImportModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={!selectedFile}
+                  disabled={!selectedFile || isMappingInvalid}
                   className="px-4 py-2 bg-[--accent] text-white rounded-lg font-bold text-sm hover:bg-[--accent-hover] shadow-sm disabled:opacity-40"
                 >
                   Import
