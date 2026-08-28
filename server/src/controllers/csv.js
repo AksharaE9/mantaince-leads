@@ -442,6 +442,28 @@ export const streamFailedRows = async (req, res) => {
 
         if (errors.length === 0) return res.status(400).json({ success: false, error: 'No errors found' });
 
+        // ── Crash vs. validation distinction ────────────────────────────────────
+        // If the job failed due to a system error (code/runtime crash) before any
+        // rows were evaluated, all entries will have code 'SYSTEM_ERROR' and no
+        // originalRow. Emit a clearly-labelled single header row so the user
+        // understands this is a server fault, not a data fault — and can supply
+        // the Reference ID to support.  Never write a raw ReferenceError message
+        // as if it were a per-row "Reason for Failure".
+        const systemErrors = errors.filter(e => e.code === 'SYSTEM_ERROR');
+        const rowErrors = errors.filter(e => e.code !== 'SYSTEM_ERROR' && e.originalRow);
+
+        const csvHeader = 'Business Name,Phone Number,Reason for Failure\n';
+
+        if (systemErrors.length > 0 && rowErrors.length === 0) {
+            // Pure system crash — no data rows were evaluated
+            const refId = systemErrors[0]?.reason?.match(/Reference ID: ([^\s.]+)/)?.[1] || batchId;
+            const systemRow = `"SYSTEM ERROR — no data rows were evaluated","","Import failed due to a system error. No rows were processed. Reference ID: ${refId}. Please contact support with this reference ID."`;
+            const csvContent = csvHeader + systemRow + '\n';
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', `attachment; filename=failed-records-${batchId}.csv`);
+            return res.status(200).send(csvContent);
+        }
+
         // Helper to extract Business Name from originalRow
         const extractBusinessName = (originalRow) => {
             if (!originalRow || typeof originalRow !== 'object') return '';
@@ -498,8 +520,8 @@ export const streamFailedRows = async (req, res) => {
             return '';
         };
 
-        const csvHeader = 'Business Name,Phone Number,Reason for Failure\n';
-        const csvRows = errors.map(e => {
+        // Normal path: genuine per-row failures only
+        const csvRows = rowErrors.map(e => {
             const bizName = extractBusinessName(e.originalRow);
             const phone = extractPhoneNumber(e.originalRow);
             const reason = e.reason || '';

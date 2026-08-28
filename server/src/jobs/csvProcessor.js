@@ -6,6 +6,7 @@ import { parseUploadBuffer } from '../services/spreadsheetParser.js';
 import { ErrorCodes } from '../utils/operationError.js';
 import { logger } from '../lib/logger.js';
 import { hasFollowupData, extractFollowupFields, INTERACTION_OUTCOMES } from '../services/interactionLogImportSchema.js';
+import { BASE_FIELDS_POSITIVE, BASE_FIELDS_CALL } from '../services/leadImportSchema.js';
 
 // ── Batch sizing ───────────────────────────────────────────────────────────────
 // 1000 rows per INSERT: matches bulkInsert.js CHUNK_SIZE, halves round-trips vs. 500.
@@ -487,7 +488,7 @@ const processCsvJob = async (job) => {
                 const rawName = columnMapping ? row['businessName'] : (
                     row['business/person/shop/company name'] ||
                     row['business person, shop, and company name'] ||
-                    row['name'] || row['business'] || row['business name'] || '');
+                    row['lead name'] || row['name'] || row['business'] || row['business name'] || '');
                 const rawBusiness = rawName;
 
                 if (!rawPhone) {
@@ -553,16 +554,24 @@ const processCsvJob = async (job) => {
                     dataMap['businessName']      = rawBusiness;
                     dataMap['area']              = row['area'] || '';
                     dataMap['city']              = row['city'] || '';
-                    dataMap['deliveredLocation'] = row['map location link/address'] || row['map location link / address'] || row['link address'] || row['delivered location'] || row['address'] || '';
+                    dataMap['deliveredLocation'] = row['map location link/address'] || row['map location link / address'] || row['map location'] || row['link address'] || row['delivered location'] || row['address'] || '';
                     dataMap['requirement']       = row['requirement'] || row['requirement if any'] || row['requirement order if any'] || '';
                     dataMap['remarks']           = row['remarks'] || '';
+                    dataMap['callStatus']        = row['call status'] || '';
+                    dataMap['customerResponse']  = row['customer response'] || row['response'] || '';
                     dataMap['followUpRequired']  = row['follow up require (yes/no)'] || row['follow-up require (yes/no)'] || row['follow-up required'] || row['appointment type (yes or no)'] || row['appointment type'] || '';
                     dataMap['followUpDate']      = row['follow up date'] || row['follow-up date'] || row['follow-up dates'] || row['appointment date'] || '';
+                    dataMap['followUpTime']      = row['follow-up time'] || row['follow up time'] || '';
+                    dataMap['nextAction']        = row['next action'] || row['action'] || '';
                     dataMap['followUpRemarks']   = row['follow up remarks'] || row['follow-up remarks'] || row['notes to the cos if any'] || row['a notes to the cos team only'] || row['notes'] || '';
+                    dataMap['contactPerson']     = row['contact person'] || row['point of contact'] || '';
+                    dataMap['alternateNumber']   = row['alternate number(if any)'] || row['alternate number (if any)'] || row['alternate number'] || '';
+                    dataMap['productService']    = row['product/service'] || row['product service'] || row['business type'] || '';
 
                     if (leadType === 'POSITIVE') {
                         dataMap['positive']          = row['positive(y/n)'] || row['positive'] || '';
-                        dataMap['converted']         = row['converted (y/n)'] || row['converted'] || '';
+                        // 'cnverted (y/n)' is a known header typo (missing 'o') — handle transparently
+                        dataMap['converted']         = row['converted (y/n)'] || row['converted'] || row['cnverted (y/n)'] || row['cnverted'] || '';
                         dataMap['appointmentDate']   = row['appointment date'] || '';
                         dataMap['appointmentTime']   = row['appointment time'] || row['appointment timings'] || '';
                     }
@@ -815,8 +824,28 @@ const processCsvJob = async (job) => {
         await job.progress(100);
 
     } catch (error) {
+        // Log full stack trace server-side with the correlation ID so it can be traced
+        // even though the user-facing message is deliberately vague.
         logger.error({ correlationId: batchId, section: 'bulk_upload', operation: 'bulk_upload', verticalId, uploadedBy, err: { message: error.message, stack: error.stack } }, `[csvProcessor] job ${batchId} failed: ${error.message}`);
-        const failedErrors = errors && errors.length > 0 ? errors : [{ row: 0, code: ErrorCodes.INTERNAL_ERROR, reason: error.message }];
+
+        // IMPORTANT: distinguish a system crash (code/runtime error that fired
+        // before any row was evaluated) from genuine per-row validation failures.
+        // Never write a raw ReferenceError / TypeError message into the failed-
+        // records report as if it were a per-row reason — that misleads users
+        // into thinking their file is at fault when the bug is in the code.
+        const isCrashBeforeRowProcessing = !(errors && errors.length > 0);
+        const systemCrashEntry = {
+            row: 0,
+            code: 'SYSTEM_ERROR',
+            reason: `Import failed due to a system error. No rows were processed. Reference ID: ${batchId}. Please contact support with this reference.`,
+            // Internal detail kept server-side only (not emitted to CSV report)
+            _internalDetail: error.message,
+            warning: false,
+        };
+        const failedErrors = isCrashBeforeRowProcessing
+            ? [systemCrashEntry]
+            : errors;
+
         await query(
             'UPDATE csv_upload_logs SET status = $1, errors = $2 WHERE id = $3',
             ['failed', JSON.stringify(failedErrors), batchId]

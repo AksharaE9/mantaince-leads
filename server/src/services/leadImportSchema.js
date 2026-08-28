@@ -76,7 +76,10 @@ export const BASE_FIELDS_POSITIVE = [
     { key: 'positive', label: 'Positive (Y/N)', csvHeader: 'Positive (Y/N)', type: 'enum', options: ['Y', 'N', 'Yes', 'No'], required: false,
         aliases: ['Positive (Y/N)', 'Positive(Y/N)', 'Positive', 'Positive Y/N'] },
     { key: 'converted', label: 'Converted (Y/N)', csvHeader: 'Converted (Y/N)', type: 'enum', options: ['Y', 'N', 'Yes', 'No'], required: false,
-        aliases: ['Converted (Y/N)', 'Converted(Y/N)', 'Converted', 'Conversion'] },
+        // NOTE: 'Cnverted (Y/N)' is a known header typo (missing 'o') present in
+        // Aroma_Dew_Soap.xlsx and likely other files from the same template source.
+        // The alias handles it transparently; the stored value is unchanged.
+        aliases: ['Converted (Y/N)', 'Converted(Y/N)', 'Converted', 'Conversion', 'Cnverted (Y/N)', 'Cnverted(Y/N)', 'Cnverted'] },
     { key: 'appointmentDate', label: 'Appointment Date', csvHeader: 'Appointment Date', type: 'string', required: false,
         aliases: ['Appointment Date'] },
     { key: 'appointmentTime', label: 'Appointment Time', csvHeader: 'Appointment Time', type: 'string', required: false,
